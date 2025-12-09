@@ -1,0 +1,10 @@
+dependencies = [
+    "docling>=2.31.0",
+    "langchain-core>=0.3.56",
+    "langchain-groq>=0.3.2",
+    "langchain-ollama>=0.3.2",
+    "ollama>=0.4.8",
+    "pypdfium2>=4.30.1",
+    "python-dotenv>=1.1.0",
+    "streamlit>=1.45.0",
+]
