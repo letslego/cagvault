@@ -1,5 +1,5 @@
 from config import Config, ModelConfig, ModelProvider
-from langchain.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
 from langchain_core.language_models import BaseChatModel
 

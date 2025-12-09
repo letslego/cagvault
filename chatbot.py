@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptValue
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompt_values import PromptValue
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.language_models import BaseChatModel
 from knowledge import KnowledgeSource

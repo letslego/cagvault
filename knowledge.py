@@ -2,11 +2,14 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from io import BytesIO
-from docling.document_converter import DocumentConverter, DocumentStream
-from docling.document_converter import InputFormat
-from docling.datamodel.base_models import PdfFormatOption
-from docling.pipeline import StandardPdfPipeline
-from docling.pdf_backend.pypdfium_backend import PyPdfiumDocumentBackend
+from docling.document_converter import (
+    DocumentConverter,
+    DocumentStream,
+    InputFormat,
+    PdfFormatOption,
+    StandardPdfPipeline,
+)
+from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
 
 class KnowledgeType(str, Enum):
     DOCUMENT = "document"
@@ -31,7 +34,7 @@ def create_document_converter() -> DocumentConverter:
         format_options={
             InputFormat.PDF: PdfFormatOption(
                 pipeline_cls=StandardPdfPipeline,
-                backend=PyPdfiumDocumentBackend, # Using PyPdfium backend
+                backend=DoclingParseV4DocumentBackend,
             ),
         },
     )

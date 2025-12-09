@@ -8,7 +8,7 @@ st.set_page_config(
     page_title="CogVault CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
 )
  
-st.header("🌵 CogVault CAG")
+st.header("🌵 Doc CAG")
 st.subheader("Completely local and private chat with your documents")
 
 @st.cache_resource(show_spinner=False)
