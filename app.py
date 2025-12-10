@@ -6,7 +6,7 @@ from chatbot import ChunkType, ask, create_context_cache, clear_cache
 from kvcache import get_kv_cache
 
 st.set_page_config(
-    page_title="CogVault CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
+    page_title="CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
 )
  
 st.header("🌵 CAG Agentic Chat")
@@ -117,7 +117,7 @@ elif st.session_state.sources:
         with st.chat_message(message["role"], avatar=avatar_icon):
             thinking_content = message.get("thinking")
             if thinking_content:
-                with st.expander("CogVault's thoughts", expanded=False):
+                with st.expander("CAG's thoughts", expanded=False):
                     st.markdown(thinking_content)
  
             st.markdown(message["content"])
@@ -125,7 +125,7 @@ elif st.session_state.sources:
     chat_enabled = len(st.session_state.sources) > 0
  
     if prompt := st.chat_input(
-        "Ask CogVault about your documents...",
+        "Ask CAG about your documents...",
         key="chat_input",
         disabled=not chat_enabled,
     ):
@@ -152,16 +152,16 @@ elif st.session_state.sources:
                     message_placeholder.markdown(full_response_content + "▌")
                 elif chunk_type == ChunkType.START_THINK:
                     with think_expander_placeholder.container():
-                        with st.expander("CogVault thoughts...", expanded=True):
+                        with st.expander("CAG thoughts...", expanded=True):
                             st.markdown("...")
                 elif chunk_type == ChunkType.THINKING:
                     thinking_content_buffer += chunk_content
                     with think_expander_placeholder.container():
-                        with st.expander("CogVault thoughts...", expanded=True):
+                        with st.expander("CAG's thoughts...", expanded=True):
                             st.markdown(thinking_content_buffer + "▌")
                 elif chunk_type == ChunkType.END_THINK:
                     with think_expander_placeholder.container():
-                        with st.expander("CogVault thoughts...", expanded=True):
+                        with st.expander("CAG's thoughts...", expanded=True):
                             st.markdown(thinking_content_buffer)
                 else:
                     st.error("Unknown chunk type received from the model.")
