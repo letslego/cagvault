@@ -6,19 +6,102 @@ A **Cache-Augmented Generation (CAG)** application for private, local document c
 
 Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You Need for Knowledge Tasks"*](https://arxiv.org/abs/2412.15605v1) (WWW '25), CAG is an alternative paradigm to traditional Retrieval-Augmented Generation (RAG) that leverages the extended context capabilities of modern LLMs.
 
-### CAG vs RAG
+### CAG vs RAG: Visual Comparison
 
-**Traditional RAG workflow:**
-- Real-time retrieval for each query
-- Potential retrieval errors and latency
-- Complex system architecture (retriever + generator)
-- Risk of incomplete or irrelevant document selection
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     TRADITIONAL RAG WORKFLOW                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  User Query                                                                  │
+│      │                                                                       │
+│      ▼                                                                       │
+│  ┌──────────────────┐         ┌──────────────────┐                         │
+│  │  Retriever       │◄────────┤  Search Index    │  ⏱️  LATENCY             │
+│  │  (BM25/Dense)    │         │  (Large DB)      │                         │
+│  └────────┬─────────┘         └──────────────────┘                         │
+│           │                                                                  │
+│           │ Retrieved Documents                                             │
+│           ▼                                                                  │
+│  ┌──────────────────┐                                                       │
+│  │ Generator (LLM)  │  ⚠️  Risk of:                                         │
+│  │                  │      • Missing relevant docs                          │
+│  │  (Generate Ans)  │      • Ranking errors                                │
+│  └────────┬─────────┘      • Search failures                               │
+│           │                                                                  │
+│           ▼                                                                  │
+│      Answer                                                                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-**CAG workflow:**
-1. **Preload Phase**: All relevant documents are loaded into the LLM's extended context window
-2. **Cache Phase**: The model's key-value (KV) cache is precomputed and stored, encapsulating the inference state
-3. **Inference Phase**: Queries use the preloaded parameters directly—no retrieval needed
-4. **Reset Phase**: Cache can be efficiently truncated and reset for new sessions
+┌─────────────────────────────────────────────────────────────────────────────┐
+│               CACHE-AUGMENTED GENERATION (CAG) WORKFLOW                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─── SETUP PHASE (One-time) ─────────────────────────────────────────┐   │
+│  │                                                                    │   │
+│  │  All Documents                                                     │   │
+│  │      │                                                             │   │
+│  │      ▼                                                             │   │
+│  │  ┌──────────────────┐                                             │   │
+│  │  │  LLM Processor   │  Precompute KV-Cache                        │   │
+│  │  │  (Batch Process) │  (Encodes all knowledge)                    │   │
+│  │  └────────┬─────────┘                                             │   │
+│  │           │                                                        │   │
+│  │           ▼                                                        │   │
+│  │  ┌──────────────────────┐                                         │   │
+│  │  │  Cached KV-State     │  💾  Stored on Disk/Memory             │   │
+│  │  │  (Ready to use)      │                                         │   │
+│  │  └──────────┬───────────┘                                         │   │
+│  │             │                                                     │   │
+│  └─────────────┼─────────────────────────────────────────────────────┘   │
+│                │                                                           │
+│  ┌─── INFERENCE PHASE (Fast) ────────────────────────────────────────┐   │
+│  │                                                                   │   │
+│  │  User Query        Cached KV-State                               │   │
+│  │      │                  │                                        │   │
+│  │      └──────────┬───────┘                                        │   │
+│  │                 ▼                                                │   │
+│  │        ┌──────────────────────┐                                 │   │
+│  │        │  LLM with Preloaded  │  ✨ NO RETRIEVAL!               │   │
+│  │        │  Context + KV-Cache  │  ✨ NO LATENCY!                │   │
+│  │        │                      │  ✨ GUARANTEED CONTEXT!        │   │
+│  │        └──────────┬───────────┘                                 │   │
+│  │                   │                                              │   │
+│  │                   ▼                                              │   │
+│  │              Answer (Instant)                                    │   │
+│  │                                                                  │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                           │
+│  ┌─── MULTI-TURN OPTIMIZATION ───────────────────────────────────────┐   │
+│  │                                                                   │   │
+│  │  For next query: Simply truncate and reuse cached knowledge     │   │
+│  │  (No need to reprocess documents)                              │   │
+│  │                                                                 │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Workflow Phases
+
+**1. Preload Phase** (One-time setup)
+- All relevant documents are loaded into the LLM's extended context window
+- The model processes the entire knowledge base at once
+
+**2. Cache Phase** (Offline computation)
+- The model's key-value (KV) cache is precomputed and stored
+- This cache encapsulates the inference state of the LLM with all knowledge
+- No additional computation needed for each query
+
+**3. Inference Phase** (Fast queries)
+- User queries are appended to the preloaded context
+- The model uses the cached parameters to generate responses directly
+- **No retrieval step needed** → Instant answers
+
+**4. Reset Phase** (Multi-turn optimization)
+- For new queries, the cache is efficiently truncated and reused
+- The preloaded knowledge remains available without reprocessing
 
 ### Advantages
 
