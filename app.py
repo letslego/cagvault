@@ -5,6 +5,10 @@ from models import create_llm, BaseChatModel
 from chatbot import ChunkType, ask, create_context_cache, clear_cache
 from kvcache import get_kv_cache
 
+# Import Claude Skills PDF parser
+from skills.pdf_parser.enhanced_parser import get_enhanced_parser
+from skills.pdf_parser.ner_search import get_searchable_parser
+
 st.set_page_config(
     page_title="CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
 )
@@ -15,6 +19,16 @@ st.subheader("Completely local and private chat with your documents")
 @st.cache_resource(show_spinner=False)
 def create_chatbot() -> BaseChatModel:
     return create_llm(Config.MODEL)
+
+@st.cache_resource(show_spinner=False)
+def init_pdf_parser():
+    """Initialize enhanced PDF parser with NER and search."""
+    return get_enhanced_parser()
+
+@st.cache_resource(show_spinner=False)
+def init_search_parser():
+    """Initialize searchable parser."""
+    return get_searchable_parser()
  
 def delete_source(source_id):
     del st.session_state.sources[source_id]
@@ -29,6 +43,8 @@ if "context_cache_id" not in st.session_state:
     st.session_state.context_cache_id = None
 if "message_source_ids" not in st.session_state:
     st.session_state.message_source_ids = set()
+if "parsed_documents" not in st.session_state:
+    st.session_state.parsed_documents = {}  # Store parsed PDF metadata
     
 with st.sidebar:
     st.title("CAG Vault")
@@ -58,12 +74,54 @@ with st.sidebar:
     if uploaded_file is not None:
         st.session_state.upload_counter += 1
         st.info(f"CAG is learning from {uploaded_file.name}...")
-        source = load_from_file(uploaded_file.name, uploaded_file.read())
-        st.session_state.sources[source.id] = source
-        # Update messages to reference only the new documents
-        st.session_state.message_source_ids = {source.id}
-        # Invalidate cache when sources change
-        st.session_state.context_cache_id = None
+        
+        # Save file temporarily and parse with Claude Skills
+        import tempfile
+        import os
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
+        
+        try:
+            # Load file into knowledge base
+            source = load_from_file(uploaded_file.name, uploaded_file.read())
+            st.session_state.sources[source.id] = source
+            st.session_state.message_source_ids = {source.id}
+            st.session_state.context_cache_id = None
+            
+            # Parse with Claude Skills for enhanced processing
+            with st.spinner("🔄 Parsing PDF with Claude Skills..."):
+                pdf_parser = init_pdf_parser()
+                search_parser = init_search_parser()
+                
+                # Extract sections
+                extraction_result = pdf_parser.parse_and_extract_sections(tmp_path)
+                
+                # Store parsed metadata
+                st.session_state.parsed_documents[source.id] = {
+                    'document_name': uploaded_file.name,
+                    'document_id': extraction_result.get('document_id'),
+                    'sections_count': extraction_result.get('sections_count', 0),
+                    'extraction_result': extraction_result
+                }
+                
+                # Show extraction summary
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📄 Pages", extraction_result.get('pages_count', 0))
+                with col2:
+                    st.metric("📑 Sections", extraction_result.get('sections_count', 0))
+                with col3:
+                    st.metric("🔍 Entities", extraction_result.get('entities_found', 0))
+                
+            st.success(f"✅ {uploaded_file.name} parsed and ready for Q&A!")
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        
         st.rerun()
         
         st.markdown("---")
@@ -93,6 +151,59 @@ with st.sidebar:
     if not st.session_state.sources:
         st.info("Add a document above to start")
     else:
+        # Show parsed document information
+        if st.session_state.parsed_documents:
+            st.markdown("**🔬 Parsed Document Analysis**")
+            for source_id, parsed_info in st.session_state.parsed_documents.items():
+                with st.expander(f"📋 {parsed_info['document_name']}", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Sections", parsed_info.get('sections_count', 0))
+                    with col2:
+                        entities = parsed_info.get('extraction_result', {}).get('entities_found', 0)
+                        st.metric("Entities", entities)
+                    with col3:
+                        doc_id = parsed_info.get('extraction_result', {}).get('document_id', 'N/A')
+                        st.caption(f"ID: {doc_id[:8]}...")
+                    
+                    # Search and NER options
+                    search_tab, entities_tab = st.tabs(["🔍 Search", "🏷️ Entities"])
+                    
+                    with search_tab:
+                        search_query = st.text_input(
+                            "Search in document",
+                            key=f"search_{source_id}",
+                            placeholder="Find text..."
+                        )
+                        if search_query:
+                            pdf_parser = init_pdf_parser()
+                            results = pdf_parser.search_document(
+                                doc_id, 
+                                search_query
+                            )
+                            st.json(results, expanded=False)
+                    
+                    with entities_tab:
+                        entity_type_filter = st.selectbox(
+                            "Filter by entity type",
+                            ["All", "MONEY", "DATE", "PARTY", "AGREEMENT", "PERCENTAGE"],
+                            key=f"entity_filter_{source_id}"
+                        )
+                        search_parser = init_search_parser()
+                        if entity_type_filter != "All":
+                            entities = search_parser.search_engine.search_entities(doc_id, entity_type_filter)
+                        else:
+                            entities = search_parser.search_engine.entities_by_document.get(doc_id, [])
+                        
+                        if entities:
+                            st.write(f"**Found {len(entities)} {entity_type_filter} entities**")
+                            for entity in entities[:10]:
+                                st.caption(f"**{entity.type}**: {entity.text}")
+                        else:
+                            st.info(f"No {entity_type_filter} entities found")
+            
+            st.markdown("---")
+        
         source_to_delete = None
         source_list_container = st.container()
         with source_list_container:

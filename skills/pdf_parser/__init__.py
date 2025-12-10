@@ -24,9 +24,24 @@ from .integration import (
     claude_get_structure,
 )
 
-__version__ = "1.0.0"
+from .enhanced_parser import (
+    EnhancedPDFParserSkill,
+    SectionMemoryStore,
+    Section,
+    SectionMetadata,
+    get_enhanced_parser,
+    extract_document_sections,
+    get_section_details,
+    get_document_hierarchy,
+    search_sections,
+    get_section_metadata,
+    list_all_documents,
+)
+
+__version__ = "1.1.0"
 __author__ = "CAG Skills Team"
 __all__ = [
+    # Basic parser
     "PDFParserSkill",
     "ParsedDocument",
     "DocumentMetadata",
@@ -35,9 +50,22 @@ __all__ = [
     "parse_web_content",
     "search_document",
     "get_document_metadata",
+    # Integration
     "CAGPDFIntegration",
     "claude_parse_pdf",
     "claude_ingest_pdf",
     "claude_search_pdf",
     "claude_get_structure",
+    # Enhanced parser with section memory
+    "EnhancedPDFParserSkill",
+    "SectionMemoryStore",
+    "Section",
+    "SectionMetadata",
+    "get_enhanced_parser",
+    "extract_document_sections",
+    "get_section_details",
+    "get_document_hierarchy",
+    "search_sections",
+    "get_section_metadata",
+    "list_all_documents",
 ]

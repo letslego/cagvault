@@ -1,0 +1,62 @@
+{
+  "document": "Agiliti.pdf",
+  "file_size": 4198465,
+  "skill": {
+    "success": true,
+    "time": 37.32788586616516,
+    "result": {
+      "name": "Agiliti.pdf",
+      "id": "pdf_322b77bfc479260cdbf4a13a406da51ff5ce944270ef986f1e83004349c300df",
+      "metadata": {
+        "pages": 188,
+        "file_size": 4198465,
+        "parse_date": "2025-12-10T14:40:55.802691",
+        "format": "pdf"
+      },
+      "content": {
+        "length": 748585,
+        "preview": "CREDIT AGREEMENT\n\nDated as of January 4, 2019 Among\n\nAGILITI HEALTH, INC., as the Borrower,\n\nAGILITI HOLDCO, INC., as Holdings,\n\nTHE SUBSIDIARIES OF THE BORROWER FROM TIME TO TIME PARTY HERETO,\n\nTHE F..."
+      },
+      "structure": {
+        "sections": 1,
+        "top_sections": [
+          {
+            "level": 2,
+            "title": "Table of Contents",
+            "content_length": 744574
+          }
+        ]
+      },
+      "tables": {
+        "count": 8,
+        "first_table": {
+          "headers": [
+            "",
+            "",
+            "Page"
+          ],
+          "rows": 34
+        }
+      },
+      "cache_path": ".cache/documents/322b77bfc479260cdbf4a13a406da51ff5ce944270ef986f1e83004349c300df.pkl"
+    },
+    "error": null
+  },
+  "docling": {
+    "success": true,
+    "time": 35.00852131843567,
+    "result": {
+      "pages": 188,
+      "content": {
+        "length": 748585,
+        "preview": "CREDIT AGREEMENT\n\nDated as of January 4, 2019 Among\n\nAGILITI HEALTH, INC., as the Borrower,\n\nAGILITI HOLDCO, INC., as Holdings,\n\nTHE SUBSIDIARIES OF THE BORROWER FROM TIME TO TIME PARTY HERETO,\n\nTHE F..."
+      },
+      "document_info": {
+        "main_text": "N/A",
+        "pages": 188
+      },
+      "raw_output_size": 2448654
+    },
+    "error": null
+  }
+}
