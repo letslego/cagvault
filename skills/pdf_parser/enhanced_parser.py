@@ -13,6 +13,7 @@ import logging
 import re
 
 from .ner_search import NamedEntityRecognizer, FullTextSearchEngine, EnhancedSearchableParser
+from .credit_analyst_prompt import get_credit_analyst
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class SectionMetadata:
     page_range: Optional[str] = None  # e.g., "3-7" for multi-page sections
     start_page: int = 1  # Actual start page
     end_page: int = 1  # Actual end page
+    section_type: Optional[str] = None  # Section classification (DEFINITIONS, COVENANT, DEFAULT, etc.)
+    importance_score: float = 0.5  # Importance score 0-1 from credit analyst
+    typical_dependencies: List[str] = field(default_factory=list)  # Related section types
     
     def __post_init__(self):
         """Generate unique ID based on hierarchy."""
@@ -338,7 +342,7 @@ class EnhancedPDFParserSkill:
         start_page: int = 1,
         end_page: int = 1
     ) -> SectionMetadata:
-        """Extract metadata for a section including page information."""
+        """Extract metadata for a section including page information and credit analyst classification."""
         # Count words precisely
         words = content.split()
         word_count = len(words)
@@ -359,6 +363,10 @@ class EnhancedPDFParserSkill:
         # Create page range display
         page_range = f"{actual_start}-{actual_end}" if actual_end > actual_start else str(actual_start)
         
+        # Analyze section with credit analyst
+        analyst = get_credit_analyst()
+        analysis = analyst.analyze_section_importance(title, content, level)
+        
         return SectionMetadata(
             title=title,
             level=level,
@@ -372,7 +380,10 @@ class EnhancedPDFParserSkill:
             page_estimate=page_estimate,
             page_range=page_range,
             start_page=actual_start,
-            end_page=actual_end
+            end_page=actual_end,
+            section_type=analysis.get("classification"),
+            importance_score=analysis.get("importance_score", 0.5),
+            typical_dependencies=analysis.get("typical_dependencies", [])
         )
     
     def get_section(self, full_section_id: str) -> Optional[Dict[str, Any]]:
@@ -685,3 +696,46 @@ def verify_document_coverage(document_id: str) -> Dict[str, Any]:
     """
     parser = get_enhanced_parser()
     return parser.verify_document_coverage(document_id)
+
+
+def create_search_strategy(document_id: str, question: str) -> Dict[str, Any]:
+    """
+    Claude Skill: Create intelligent search strategy using credit analyst expertise.
+    
+    Uses expert knowledge of credit agreement structures to prioritize sections
+    for question answering, following complete logical chains rather than stopping
+    at the first relevant section.
+    
+    Args:
+        document_id: Document ID to search
+        question: The analytical question to answer
+        
+    Returns:
+        Prioritized list of sections with reasoning and search strategy
+    """
+    parser = get_enhanced_parser()
+    sections = parser.memory.get_document_sections(document_id)
+    
+    # Convert sections to dict format for analyst
+    section_dicts = []
+    for section in sections:
+        section_dicts.append({
+            "id": section.metadata.id,
+            "title": section.metadata.title,
+            "level": section.metadata.level,
+            "content": section.content[:1000],  # First 1000 chars for classification
+            "section_type": section.metadata.section_type,
+            "importance_score": section.metadata.importance_score,
+            "page_range": section.metadata.page_range
+        })
+    
+    # Create search strategy
+    analyst = get_credit_analyst()
+    strategy = analyst.create_search_strategy(question, section_dicts)
+    
+    return {
+        "document_id": document_id,
+        "question": question,
+        "search_strategy": strategy,
+        "system_prompt_used": "Expert Syndicated Credit Analyst Framework"
+    }
