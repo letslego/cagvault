@@ -113,11 +113,12 @@ Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You N
 
 ## Features
 
-- 🔒 **Fully Local**: No API keys or cloud services required
+- 🔒 **Fully Local & Private**: No API keys, cloud services, or internet required
 - 📄 **Multi-Format Support**: PDF, TXT, MD files and web URLs
 - 💬 **Streaming Chat**: Real-time response generation with thinking process visibility
-- 🧠 **Extended Context**: Leverages Qwen3's 8K+ context window
-- 🎨 **Modern UI**: Clean Streamlit interface
+- 🧠 **Extended Context**: Leverages Qwen3-14B's 8K+ context window
+- ⚡ **KV-Cache Optimization**: Precomputed context caching for 10-40x faster multi-turn queries
+- 🎨 **Modern UI**: Clean Streamlit interface with cache statistics
 
 ## Prerequisites
 
@@ -279,18 +280,46 @@ cagvault/
 
 ### Model Selection
 
-Edit `config.py` to change models:
+By default, CagVault uses **Qwen3-14B locally via Ollama**. To change models, edit `config.py`:
 
 ```python
 class Config:
-    MODEL = QWEN_3  # Switch to LLAMA_3_3 or add your own
+    MODEL = QWEN_3  # Change to LLAMA_3_3 or add your own
     OLLAMA_CONTEXT_WINDOW = 8192  # Adjust context size
 ```
 
 ### Supported Providers
 
-- **Ollama** (default): Local inference, no API key
-- **Groq**: Cloud inference, requires `GROQ_API_KEY` environment variable
+Currently, CagVault supports:
+
+- **Ollama** (default): Local inference, completely private, no API key needed
+- **Groq** (optional): Cloud inference, requires `GROQ_API_KEY` environment variable
+
+### Available Models
+
+**Local Models (via Ollama):**
+- `hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL` (default) - Qwen3 14B, 8K context
+- `llama2:latest` - Llama 2 7B
+- `mistral:latest` - Mistral 7B
+- See [ollama.com/library](https://ollama.com/library) for more
+
+**Cloud Models (via Groq):**
+- `meta-llama/llama-3.1-8b-instant`
+- `mixtral-8x7b-32768`
+
+To use a different local model, pull it first:
+```bash
+ollama pull <model-name>
+```
+
+Then update `config.py`:
+```python
+QWEN_3 = ModelConfig(
+    "<model-name>",
+    temperature=0.0,
+    provider=ModelProvider.OLLAMA
+)
+```
 
 ## Troubleshooting
 
@@ -314,6 +343,11 @@ ollama serve &  # Linux
 ollama pull hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL
 ```
 
+Or use a different available model:
+```bash
+ollama pull llama2:latest
+```
+
 ### Python Version Issues
 
 **Error**: Pydantic warnings or import errors
@@ -322,14 +356,31 @@ ollama pull hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL
 ```bash
 python --version
 # If not 3.12, recreate the virtual environment with Python 3.12
+python3.12 -m venv .venv312
+source .venv312/bin/activate
+pip install -e .
 ```
 
 ### Out of Memory
 
-If the model runs out of memory during inference, try:
-- Using a smaller model (e.g., `llama3.3:8b` instead of `14b`)
-- Reducing `OLLAMA_CONTEXT_WINDOW` in `config.py`
-- Closing other applications
+If the model runs out of memory during inference:
+
+- Use a smaller model (e.g., `llama2:latest` instead of `qwen3:14b`)
+- Reduce `OLLAMA_CONTEXT_WINDOW` in `config.py`
+- Close other applications
+- Increase system swap space
+
+### KV-Cache Issues
+
+If cache seems corrupted or causes issues:
+
+```bash
+# Clear the cache
+rm -rf .cache/kvcache/
+
+# Or clear via the UI
+# Click "🧹 Clear Cache" in the sidebar
+```
 
 ## Performance Considerations
 
@@ -352,12 +403,48 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 5. **Query Processing**: User questions are appended to the cached context
 6. **Streaming Response**: The model generates answers using the preloaded knowledge
 
+## Technical Details
+
+### How CAG Works in This Application
+
+1. **Document Upload**: User uploads files or provides URLs
+2. **Conversion**: Docling converts documents to plain text
+3. **Context Preloading**: Documents are concatenated and passed to the LLM
+4. **KV-Cache Creation**: The model's inference state is precomputed and stored
+5. **Efficient Queries**: User questions are processed using the cached context
+6. **Streaming Response**: The model generates answers using preloaded knowledge
+
+### Architecture
+
+```
+User Documents
+    ↓
+Docling (Format Conversion)
+    ↓
+KV-Cache Manager (Precompute & Store)
+    ↓
+Ollama (Local LLM Inference)
+    ↓
+Streamlit UI (Chat Interface)
+```
+
 ### Key Components
 
+- **kvcache.py**: Manages KV-state caching with in-memory and disk storage
 - **Docling**: Converts PDF/HTML/TXT/MD → plain text with layout preservation
 - **LangChain**: Orchestrates LLM interactions and streaming
-- **Ollama**: Local LLM server with automatic KV caching
+- **Ollama**: Local inference server with automatic KV caching
 - **Streamlit**: Renders the chat UI with real-time updates
+
+### Performance Optimizations
+
+The KV-Cache implementation provides:
+
+- **No document reprocessing**: Once cached, documents aren't re-tokenized
+- **Multi-turn speedup**: 10-40x faster for subsequent queries (from paper)
+- **Memory efficient**: Tracks token counts and cache size
+- **Automatic deduplication**: Same documents aren't cached twice
+- **Persistent storage**: Caches are stored on disk for reuse across sessions
 
 ## Limitations
 

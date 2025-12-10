@@ -14,3 +14,5 @@ def create_llm(model_config: ModelConfig) -> BaseChatModel:
         )
     elif model_config.provider == ModelProvider.GROQ:
         return ChatGroq(model=model_config.name, temperature=model_config.temperature)
+    else:
+        raise ValueError(f"Unsupported provider: {model_config.provider}")
