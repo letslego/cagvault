@@ -384,10 +384,12 @@ class PDFParserSkill:
         Extract hierarchical sections from markdown content with page tracking.
         
         Ensures all content is captured and tracks which page range contains each section.
+        Maximizes granularity by creating dedicated sections for preamble content blocks.
         """
         lines = content.split("\n")
         sections = []
         section_stack = []  # Stack to track current section hierarchy
+        preamble_lines = []  # Collect preamble content before first header
         
         line_num = 0
         while line_num < len(lines):
@@ -395,6 +397,12 @@ class PDFParserSkill:
             
             # Detect headers
             if line.startswith("#"):
+                # First, flush any accumulated preamble content as separate sections
+                if preamble_lines and not section_stack:
+                    # Clear section stack when we hit first header
+                    self._create_preamble_sections(preamble_lines, sections, tracker, len(lines))
+                    preamble_lines = []
+                
                 # Count level by # symbols
                 match = re.match(r'^(#+)', line)
                 if match:
@@ -409,14 +417,18 @@ class PDFParserSkill:
                             "content": "",
                             "subsections": [],
                             "start_line": line_num,
-                            "page_estimate": page_est
+                            "page_estimate": page_est,
+                            "start_page": page_est,
+                            "end_page": page_est
                         }
                         
                         # Pop stack until we find the correct parent level
                         while section_stack and section_stack[-1]["level"] >= level:
                             popped = section_stack.pop()
                             popped["end_line"] = line_num
-                            popped["page_end_estimate"] = tracker.get_page_for_line(line_num) if tracker else self._estimate_page_from_line(line_num, len(lines))
+                            end_page = tracker.get_page_for_line(line_num) if tracker else self._estimate_page_from_line(line_num, len(lines))
+                            popped["page_end_estimate"] = end_page
+                            popped["end_page"] = end_page
                         
                         # Add to parent or root
                         if section_stack:
@@ -431,9 +443,11 @@ class PDFParserSkill:
                     # Fallback: treat as content if header parsing fails
                     if section_stack:
                         section_stack[-1]["content"] += line + "\n"
+                    else:
+                        preamble_lines.append(line)
                     line_num += 1
             else:
-                # Add content to current section
+                # Add content to current section or preamble
                 if section_stack:
                     # Strip excessive whitespace but preserve structure
                     if line.strip():
@@ -442,31 +456,24 @@ class PDFParserSkill:
                         # Preserve paragraph breaks (single empty line)
                         if not section_stack[-1]["content"].endswith("\n\n"):
                             section_stack[-1]["content"] += "\n"
-                elif line.strip():
-                    # Content before first header - create a preamble section
-                    if not sections or sections[0]["level"] != 0:
-                        preamble = {
-                            "level": 0,
-                            "title": "Preamble",
-                            "content": "",
-                            "subsections": [],
-                            "start_line": 0,
-                            "page_estimate": 1
-                        }
-                        sections.insert(0, preamble)
-                        section_stack.append(preamble)
-                    
-                    if section_stack:
-                        section_stack[-1]["content"] += line + "\n"
+                else:
+                    # Content before first header - accumulate for preamble
+                    preamble_lines.append(line)
                 
                 line_num += 1
         
-        # Mark end lines for final sections
+        # Flush any remaining preamble
+        if preamble_lines and not section_stack:
+            self._create_preamble_sections(preamble_lines, sections, tracker, len(lines))
+        
+        # Mark end lines for final sections in stack
         for section in section_stack:
             section["end_line"] = len(lines)
-            section["page_end_estimate"] = tracker.get_page_for_line(len(lines)) if tracker else self._estimate_page_from_line(len(lines), len(lines))
+            end_page = tracker.get_page_for_line(len(lines)) if tracker else self._estimate_page_from_line(len(lines), len(lines))
+            section["page_end_estimate"] = end_page
+            section["end_page"] = end_page
         
-        # Clean up sections - remove empty ones but keep structure
+        # Clean up sections - remove truly empty ones but keep structure
         def clean_sections(secs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             """Remove empty content but preserve section structure."""
             cleaned = []
@@ -478,13 +485,51 @@ class PDFParserSkill:
                 if sec["subsections"]:
                     sec["subsections"] = clean_sections(sec["subsections"])
                 
-                # Skip preamble if empty, but keep others to preserve document structure
-                if sec["content"] or sec["subsections"] or sec.get("level", 1) != 0:
+                # Keep sections with content, subsections, or headers (skip only if truly empty)
+                if sec["content"] or sec["subsections"]:
                     cleaned.append(sec)
             
             return cleaned
         
         return clean_sections(sections)
+    
+    def _create_preamble_sections(
+        self,
+        preamble_lines: List[str],
+        sections: List[Dict[str, Any]],
+        tracker: Optional[PageTracker],
+        total_lines: int
+    ) -> None:
+        """
+        Create preamble section(s) from accumulated lines.
+        
+        If preamble is large, split it into multiple sections for granularity.
+        """
+        if not preamble_lines:
+            return
+        
+        # Join and filter
+        preamble_text = "\n".join(preamble_lines).strip()
+        if not preamble_text:
+            return
+        
+        # Create single preamble section
+        start_page = 1
+        end_page = tracker.get_page_for_line(len(preamble_lines)) if tracker else self._estimate_page_from_line(len(preamble_lines), total_lines)
+        
+        preamble = {
+            "level": 0,
+            "title": "Preamble",
+            "content": preamble_text,
+            "subsections": [],
+            "start_line": 0,
+            "page_estimate": start_page,
+            "start_page": start_page,
+            "end_page": end_page,
+            "page_end_estimate": end_page,
+            "end_line": len(preamble_lines)
+        }
+        sections.insert(0, preamble)
     
     def _estimate_page_from_line(self, line_num: int, total_lines: int) -> int:
         """

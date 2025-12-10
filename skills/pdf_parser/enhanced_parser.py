@@ -34,6 +34,8 @@ class SectionMetadata:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     page_estimate: int = 1  # Estimated starting page
     page_range: Optional[str] = None  # e.g., "3-7" for multi-page sections
+    start_page: int = 1  # Actual start page
+    end_page: int = 1  # Actual end page
     
     def __post_init__(self):
         """Generate unique ID based on hierarchy."""
@@ -291,6 +293,8 @@ class EnhancedPDFParserSkill:
         end_line = section_data.get("end_line", 0)
         page_estimate = section_data.get("page_estimate", 1)
         page_end_estimate = section_data.get("page_end_estimate", page_estimate)
+        start_page = section_data.get("start_page", page_estimate)
+        end_page = section_data.get("end_page", page_end_estimate)
         
         # Extract metadata
         metadata = self._extract_section_metadata(
@@ -300,7 +304,9 @@ class EnhancedPDFParserSkill:
             start_line=start_line,
             end_line=end_line,
             page_estimate=page_estimate,
-            page_end_estimate=page_end_estimate
+            page_end_estimate=page_end_estimate,
+            start_page=start_page,
+            end_page=end_page
         )
         
         # Create section
@@ -328,10 +334,12 @@ class EnhancedPDFParserSkill:
         start_line: int = 0,
         end_line: int = 0,
         page_estimate: int = 1,
-        page_end_estimate: int = 1
+        page_end_estimate: int = 1,
+        start_page: int = 1,
+        end_page: int = 1
     ) -> SectionMetadata:
         """Extract metadata for a section including page information."""
-        # Count words
+        # Count words precisely
         words = content.split()
         word_count = len(words)
         
@@ -341,9 +349,15 @@ class EnhancedPDFParserSkill:
         # Check for tables (simple heuristic)
         has_tables = bool(re.search(r'\|.*\|', content))
         
-        # Use estimated start/end pages
-        end_page = max(page_estimate, page_end_estimate)
-        page_range = f"{page_estimate}-{end_page}" if end_page > page_estimate else str(page_estimate)
+        # Use actual start/end pages if provided, otherwise use estimates
+        actual_start = start_page if start_page > 0 else page_estimate
+        actual_end = end_page if end_page > 0 else page_end_estimate
+        
+        # Ensure end >= start
+        actual_end = max(actual_start, actual_end)
+        
+        # Create page range display
+        page_range = f"{actual_start}-{actual_end}" if actual_end > actual_start else str(actual_start)
         
         return SectionMetadata(
             title=title,
@@ -356,7 +370,9 @@ class EnhancedPDFParserSkill:
             has_tables=has_tables,
             subsection_count=0,
             page_estimate=page_estimate,
-            page_range=page_range
+            page_range=page_range,
+            start_page=actual_start,
+            end_page=actual_end
         )
     
     def get_section(self, full_section_id: str) -> Optional[Dict[str, Any]]:

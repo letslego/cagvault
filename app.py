@@ -188,10 +188,11 @@ with st.sidebar:
                         if sections:
                             for section in sections:
                                 meta = section.metadata
-                                with st.expander(f"{meta.title} (p. {meta.page_range or meta.page_estimate})", expanded=False):
+                                page_display = f"p. {meta.start_page}-{meta.end_page}" if (meta.start_page and meta.end_page) else f"p. {meta.page_range or meta.page_estimate}"
+                                with st.expander(f"{meta.title} ({page_display})", expanded=False):
                                     st.markdown(
-                                        f"**Level:** {meta.level} • **Pages:** {meta.page_range or meta.page_estimate} • "
-                                        f"**Words:** {meta.word_count} • **Has tables:** {bool(meta.has_tables)}"
+                                        f"**Level:** {meta.level} | **Pages:** {meta.start_page}–{meta.end_page} | "
+                                        f"**Words:** {meta.word_count:,} | **Tables:** {bool(meta.has_tables)}"
                                     )
                                     st.markdown(summarize(section.content))
                         else:
