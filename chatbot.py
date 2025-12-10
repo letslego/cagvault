@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterator
+from typing import Iterator, Optional
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompt_values import PromptValue
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.language_models import BaseChatModel
 from knowledge import KnowledgeSource
+from kvcache import get_kv_cache
 
 THINK_START = "<think>"
 THINK_END = "</think>"
@@ -104,3 +105,45 @@ def _create_prompt(
             "chat_history": chat_history,
         }
     )
+
+
+def create_context_cache(sources: dict[str, KnowledgeSource]) -> str:
+    """
+    Create and cache the context from given sources.
+    
+    This function preloads all documents into the KV-cache for efficient
+    multi-turn conversations without reprocessing documents.
+    
+    Args:
+        sources: Dictionary of knowledge sources to cache
+        
+    Returns:
+        cache_id: The ID of the cached context for later retrieval
+    """
+    kv_cache = get_kv_cache()
+    context = _create_context(sources)
+    source_ids = list(sources.keys())
+    
+    cache_id = kv_cache.create(context, source_ids=source_ids)
+    return cache_id
+
+
+def get_cached_context(cache_id: str) -> Optional[str]:
+    """
+    Retrieve cached context by ID.
+    
+    Args:
+        cache_id: The cache ID from create_context_cache()
+        
+    Returns:
+        The cached context string, or None if not found
+    """
+    kv_cache = get_kv_cache()
+    entry = kv_cache.get(cache_id)
+    return entry.context if entry else None
+
+
+def clear_cache() -> None:
+    """Clear all cached contexts."""
+    kv_cache = get_kv_cache()
+    kv_cache.clear_all()
