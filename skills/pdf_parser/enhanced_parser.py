@@ -14,6 +14,7 @@ import re
 
 from .ner_search import NamedEntityRecognizer, FullTextSearchEngine, EnhancedSearchableParser
 from .credit_analyst_prompt import get_credit_analyst
+from .llm_section_evaluator import get_llm_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -739,3 +740,110 @@ def create_search_strategy(document_id: str, question: str) -> Dict[str, Any]:
         "search_strategy": strategy,
         "system_prompt_used": "Expert Syndicated Credit Analyst Framework"
     }
+
+
+def evaluate_section_for_question(
+    document_id: str,
+    section_id: str,
+    question: str,
+    previous_notes: Optional[str] = None,
+    already_checked_sections: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Claude Skill: Evaluate whether a section provides a complete answer to a question.
+    
+    Uses expert credit analyst evaluation framework to determine if this section
+    fully answers the question or if additional sections need to be retrieved.
+    
+    Args:
+        document_id: Document ID
+        section_id: Section ID to evaluate
+        question: The user's analytical question
+        previous_notes: Accumulated notes from previously analyzed sections
+        already_checked_sections: List of section titles already analyzed
+        
+    Returns:
+        Evaluation with decision (ANSWER/PASS), reasoning, and next sections to retrieve
+    """
+    parser = get_enhanced_parser()
+    evaluator = get_llm_evaluator()
+    
+    # Get the section
+    section = parser.memory.get_section(f"{document_id}#{section_id}")
+    if not section:
+        return {
+            "error": f"Section not found: {section_id}",
+            "section_id": section_id
+        }
+    
+    # Create evaluation prompt with system prompt
+    evaluation_prompt = evaluator.create_evaluation_prompt(
+        question=question,
+        section_title=section.metadata.title,
+        section_content=section.content,
+        previous_notes=previous_notes,
+        already_checked_sections=already_checked_sections
+    )
+    
+    return {
+        "document_id": document_id,
+        "section_id": section_id,
+        "section_title": section.metadata.title,
+        "system_prompt": evaluator.get_system_prompt(),
+        "evaluation_prompt": evaluation_prompt,
+        "section_type": section.metadata.section_type,
+        "importance_score": section.metadata.importance_score,
+        "cross_references": evaluator.extract_section_references(section.content),
+        "instruction": "Send system_prompt + evaluation_prompt to Claude for complete evaluation"
+    }
+
+
+def get_section_evaluation_summary(
+    document_id: str,
+    question: str
+) -> Dict[str, Any]:
+    """
+    Claude Skill: Get summary of section evaluation requirements for a question.
+    
+    Returns which sections should be evaluated and in what order.
+    
+    Args:
+        document_id: Document ID
+        question: The user's question
+        
+    Returns:
+        Evaluation plan with section order and mandatory checks
+    """
+    parser = get_enhanced_parser()
+    evaluator = get_llm_evaluator()
+    
+    # Get all sections
+    sections = parser.memory.get_document_sections(document_id)
+    
+    # Create evaluation summary
+    summary = {
+        "document_id": document_id,
+        "question": question,
+        "total_sections": len(sections),
+        "evaluation_plan": [],
+        "mandatory_checks": {}
+    }
+    
+    # For each section type that exists, add evaluation guidance
+    section_types_found = set(s.metadata.section_type for s in sections if s.metadata.section_type)
+    
+    for section_type in section_types_found:
+        mandatory = evaluator.get_mandatory_cross_references(question, section_type)
+        summary["mandatory_checks"][section_type] = mandatory
+        
+        sections_of_type = [s for s in sections if s.metadata.section_type == section_type]
+        for section in sections_of_type:
+            summary["evaluation_plan"].append({
+                "section_id": section.metadata.id,
+                "section_title": section.metadata.title,
+                "section_type": section_type,
+                "importance": section.metadata.importance_score,
+                "page_range": section.metadata.page_range
+            })
+    
+    return summary
