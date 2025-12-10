@@ -166,8 +166,36 @@ with st.sidebar:
                         doc_id = parsed_info.get('extraction_result', {}).get('document_id', 'N/A')
                         st.caption(f"ID: {doc_id[:8]}...")
                     
-                    # Search and NER options
-                    search_tab, entities_tab = st.tabs(["🔍 Search", "🏷️ Entities"])
+                    # Sections, Search, and NER views
+                    sections_tab, search_tab, entities_tab = st.tabs(["📄 Sections", "🔍 Search", "🏷️ Entities"])
+
+                    with sections_tab:
+                        parser = init_pdf_parser()
+                        sections = parser.memory.get_document_sections(doc_id) if doc_id else []
+
+                        def summarize(text: str, limit: int = 240) -> str:
+                            """Compact summary using leading sentence or clipped text."""
+                            cleaned = " ".join(part.strip() for part in text.splitlines() if part.strip())
+                            if len(cleaned) <= limit:
+                                return cleaned or "(no content)"
+                            clipped = cleaned[:limit].rsplit(" ", 1)[0]
+                            return f"{clipped}…"
+
+                        coverage_message = parsed_info.get("extraction_result", {}).get("coverage_message")
+                        if coverage_message:
+                            st.caption(coverage_message)
+
+                        if sections:
+                            for section in sections:
+                                meta = section.metadata
+                                with st.expander(f"{meta.title} (p. {meta.page_range or meta.page_estimate})", expanded=False):
+                                    st.markdown(
+                                        f"**Level:** {meta.level} • **Pages:** {meta.page_range or meta.page_estimate} • "
+                                        f"**Words:** {meta.word_count} • **Has tables:** {bool(meta.has_tables)}"
+                                    )
+                                    st.markdown(summarize(section.content))
+                        else:
+                            st.info("Sections not available for this document yet.")
                     
                     with search_tab:
                         search_query = st.text_input(

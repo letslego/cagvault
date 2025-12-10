@@ -12,6 +12,9 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import logging
+import re
+
+from .page_tracker import PageTracker
 
 from docling.document_converter import (
     DocumentConverter,
@@ -53,6 +56,9 @@ class ParsedDocument:
     tables: List[Dict[str, Any]]
     source_url: Optional[str] = None
     cache_path: Optional[str] = None
+    coverage: Optional[Dict[str, Any]] = None
+    coverage_message: Optional[str] = None
+    coverage_complete: Optional[bool] = None
 
 
 class PDFParserSkill:
@@ -121,34 +127,102 @@ class PDFParserSkill:
             logger.warning(f"Failed to cache document: {e}")
     
     def _extract_sections(self, content: str) -> List[Dict[str, Any]]:
-        """Extract hierarchical sections from markdown content."""
-        sections = []
-        current_section = None
+        """
+        Extract hierarchical sections from markdown content.
         
-        for line in content.split("\n"):
+        Ensures all content is captured, handles multiple tables of contents,
+        and maintains proper parent-child relationships for nested sections.
+        """
+        lines = content.split("\n")
+        sections = []
+        section_stack = []  # Stack to track current section hierarchy
+        
+        line_num = 0
+        while line_num < len(lines):
+            line = lines[line_num]
+            
             # Detect headers
             if line.startswith("#"):
-                level = len(line.split()[0])
-                text = line.lstrip("#").strip()
-                
-                section = {
-                    "level": level,
-                    "title": text,
-                    "content": "",
-                    "subsections": []
-                }
-                
-                if current_section is None or level == 1:
-                    sections.append(section)
-                    current_section = section
+                # Count level by # symbols
+                match = re.match(r'^(#+)', line)
+                if match:
+                    level = len(match.group(1))
+                    text = line[level:].strip()
+                    
+                    if text:  # Only process non-empty headers
+                        section = {
+                            "level": level,
+                            "title": text,
+                            "content": "",
+                            "subsections": [],
+                            "start_line": line_num
+                        }
+                        
+                        # Pop stack until we find the correct parent level
+                        while section_stack and section_stack[-1]["level"] >= level:
+                            section_stack.pop()
+                        
+                        # Add to parent or root
+                        if section_stack:
+                            section_stack[-1]["subsections"].append(section)
+                        else:
+                            sections.append(section)
+                        
+                        section_stack.append(section)
+                    
+                    line_num += 1
                 else:
-                    # Add as subsection
-                    if current_section:
-                        current_section["subsections"].append(section)
-            elif current_section and line.strip():
-                current_section["content"] += line + "\n"
+                    # Fallback: treat as content if header parsing fails
+                    if section_stack:
+                        section_stack[-1]["content"] += line + "\n"
+                    line_num += 1
+            else:
+                # Add content to current section
+                if section_stack:
+                    # Strip excessive whitespace but preserve structure
+                    if line.strip():
+                        section_stack[-1]["content"] += line + "\n"
+                    elif section_stack[-1]["content"].strip():
+                        # Preserve paragraph breaks (single empty line)
+                        if not section_stack[-1]["content"].endswith("\n\n"):
+                            section_stack[-1]["content"] += "\n"
+                elif line.strip():
+                    # Content before first header - create a preamble section
+                    if not sections or sections[0]["level"] != 0:
+                        preamble = {
+                            "level": 0,
+                            "title": "Preamble",
+                            "content": "",
+                            "subsections": [],
+                            "start_line": 0
+                        }
+                        sections.insert(0, preamble)
+                        section_stack.append(preamble)
+                    
+                    if section_stack:
+                        section_stack[-1]["content"] += line + "\n"
+                
+                line_num += 1
         
-        return sections
+        # Clean up sections - remove empty ones but keep structure
+        def clean_sections(secs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """Remove empty content but preserve section structure."""
+            cleaned = []
+            for sec in secs:
+                # Clean content
+                sec["content"] = sec["content"].strip()
+                
+                # Recursively clean subsections
+                if sec["subsections"]:
+                    sec["subsections"] = clean_sections(sec["subsections"])
+                
+                # Skip preamble if empty, but keep others to preserve document structure
+                if sec["content"] or sec["subsections"] or sec.get("level", 1) != 0:
+                    cleaned.append(sec)
+            
+            return cleaned
+        
+        return clean_sections(sections)
     
     def _extract_tables(self, content: str) -> List[Dict[str, Any]]:
         """Extract table information from markdown content."""
@@ -209,11 +283,13 @@ class PDFParserSkill:
         if not file_path.suffix.lower() in [".pdf"]:
             raise ValueError(f"Unsupported format: {file_path.suffix}")
         
-        # Check cache
+        # Check cache; re-parse if cached doc lacks coverage info
         cache_key = self._generate_cache_key(str(file_path))
         cached_doc = self._get_cached_document(cache_key)
         if cached_doc:
-            return cached_doc
+            cov = getattr(cached_doc, "coverage", None)
+            if cov and cov.get("pages_with_content", 0) > 0:
+                return cached_doc
         
         logger.info(f"Parsing PDF: {file_path}")
         
@@ -224,6 +300,13 @@ class PDFParserSkill:
             # Extract content
             content = result.document.export_to_markdown()
             
+            # Build page tracker for accurate page estimates
+            try:
+                tracker = PageTracker(result.document, content)
+            except Exception as e:
+                logger.warning(f"Page tracker initialization failed: {e}")
+                tracker = None
+            
             # Build metadata
             metadata = DocumentMetadata(
                 pages=len(result.document.pages),
@@ -233,8 +316,8 @@ class PDFParserSkill:
                 format="pdf"
             )
             
-            # Extract structure
-            sections = self._extract_sections(content)
+            # Extract structure with page information
+            sections = self._extract_sections_with_pages(content, tracker)
             tables = self._extract_tables(content)
             
             # Create parsed document
@@ -246,16 +329,172 @@ class PDFParserSkill:
                 sections=sections,
                 tables=tables
             )
+            # Attach coverage info if available
+            if tracker:
+                try:
+                    complete, cov_msg = tracker.verify_complete_coverage()
+                    doc.coverage = tracker.get_coverage_report()
+                    doc.coverage_message = cov_msg
+                    doc.coverage_complete = complete
+                except Exception as e:
+                    logger.debug(f"Could not attach coverage info: {e}")
+            else:
+                doc.coverage_message = "Coverage verification: not available"
             
             # Cache the result
             self._cache_document(doc, cache_key)
             
-            logger.info(f"Successfully parsed: {file_path.name} ({metadata.pages} pages)")
+            logger.info(f"Successfully parsed: {file_path.name} ({metadata.pages} pages, {len(sections)} sections)")
             return doc
             
         except Exception as e:
             logger.error(f"Failed to parse PDF {file_path}: {e}")
             raise
+    
+    def _extract_page_markers(self, document: Any) -> Dict[int, str]:
+        """
+        Extract page boundary information from Docling document.
+        
+            Maps content blocks to their page numbers for accurate page tracking.
+        
+            Returns:
+                Mapping of block indices to page numbers
+            """
+        page_markers = {}
+
+        try:
+            # Iterate through pages and collect block page information
+            for page_idx, page in enumerate(document.pages, 1):
+                if hasattr(page, 'blocks'):
+                    for block in page.blocks:
+                        # Store page number for each block
+                        if hasattr(block, 'block_id'):
+                            page_markers[block.block_id] = page_idx
+        except Exception as e:
+            logger.debug(f"Could not extract detailed page markers: {e}")
+
+        return page_markers
+    
+    def _extract_sections_with_pages(
+        self,
+        content: str,
+        tracker: Optional[PageTracker]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract hierarchical sections from markdown content with page tracking.
+        
+        Ensures all content is captured and tracks which page range contains each section.
+        """
+        lines = content.split("\n")
+        sections = []
+        section_stack = []  # Stack to track current section hierarchy
+        
+        line_num = 0
+        while line_num < len(lines):
+            line = lines[line_num]
+            
+            # Detect headers
+            if line.startswith("#"):
+                # Count level by # symbols
+                match = re.match(r'^(#+)', line)
+                if match:
+                    level = len(match.group(1))
+                    text = line[level:].strip()
+                    
+                    if text:  # Only process non-empty headers
+                        page_est = tracker.get_page_for_line(line_num) if tracker else self._estimate_page_from_line(line_num, len(lines))
+                        section = {
+                            "level": level,
+                            "title": text,
+                            "content": "",
+                            "subsections": [],
+                            "start_line": line_num,
+                            "page_estimate": page_est
+                        }
+                        
+                        # Pop stack until we find the correct parent level
+                        while section_stack and section_stack[-1]["level"] >= level:
+                            popped = section_stack.pop()
+                            popped["end_line"] = line_num
+                            popped["page_end_estimate"] = tracker.get_page_for_line(line_num) if tracker else self._estimate_page_from_line(line_num, len(lines))
+                        
+                        # Add to parent or root
+                        if section_stack:
+                            section_stack[-1]["subsections"].append(section)
+                        else:
+                            sections.append(section)
+                        
+                        section_stack.append(section)
+                    
+                    line_num += 1
+                else:
+                    # Fallback: treat as content if header parsing fails
+                    if section_stack:
+                        section_stack[-1]["content"] += line + "\n"
+                    line_num += 1
+            else:
+                # Add content to current section
+                if section_stack:
+                    # Strip excessive whitespace but preserve structure
+                    if line.strip():
+                        section_stack[-1]["content"] += line + "\n"
+                    elif section_stack[-1]["content"].strip():
+                        # Preserve paragraph breaks (single empty line)
+                        if not section_stack[-1]["content"].endswith("\n\n"):
+                            section_stack[-1]["content"] += "\n"
+                elif line.strip():
+                    # Content before first header - create a preamble section
+                    if not sections or sections[0]["level"] != 0:
+                        preamble = {
+                            "level": 0,
+                            "title": "Preamble",
+                            "content": "",
+                            "subsections": [],
+                            "start_line": 0,
+                            "page_estimate": 1
+                        }
+                        sections.insert(0, preamble)
+                        section_stack.append(preamble)
+                    
+                    if section_stack:
+                        section_stack[-1]["content"] += line + "\n"
+                
+                line_num += 1
+        
+        # Mark end lines for final sections
+        for section in section_stack:
+            section["end_line"] = len(lines)
+            section["page_end_estimate"] = tracker.get_page_for_line(len(lines)) if tracker else self._estimate_page_from_line(len(lines), len(lines))
+        
+        # Clean up sections - remove empty ones but keep structure
+        def clean_sections(secs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """Remove empty content but preserve section structure."""
+            cleaned = []
+            for sec in secs:
+                # Clean content
+                sec["content"] = sec["content"].strip()
+                
+                # Recursively clean subsections
+                if sec["subsections"]:
+                    sec["subsections"] = clean_sections(sec["subsections"])
+                
+                # Skip preamble if empty, but keep others to preserve document structure
+                if sec["content"] or sec["subsections"] or sec.get("level", 1) != 0:
+                    cleaned.append(sec)
+            
+            return cleaned
+        
+        return clean_sections(sections)
+    
+    def _estimate_page_from_line(self, line_num: int, total_lines: int) -> int:
+        """
+        Estimate page number based on line position and typical page length.
+        
+        Assumes roughly 50 lines per page (approximate for markdown).
+        """
+        lines_per_page = 50
+        estimated_page = max(1, (line_num // lines_per_page) + 1)
+        return estimated_page
     
     def parse_url(self, url: str) -> ParsedDocument:
         """

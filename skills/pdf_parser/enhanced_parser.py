@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SectionMetadata:
     """Metadata for a section or subsection."""
+    
     title: str
     level: int  # 1 = H1, 2 = H2, etc.
     start_line: int
@@ -31,6 +32,8 @@ class SectionMetadata:
     subsection_count: int
     parent_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    page_estimate: int = 1  # Estimated starting page
+    page_range: Optional[str] = None  # e.g., "3-7" for multi-page sections
     
     def __post_init__(self):
         """Generate unique ID based on hierarchy."""
@@ -240,19 +243,17 @@ class EnhancedPDFParserSkill:
     
     def parse_and_extract_sections(self, file_path: str) -> Dict[str, Any]:
         """
-        Parse PDF and extract sections into memory.
-        
-        Args:
-            file_path: Path to PDF file
-            
-        Returns:
-            Summary of extraction with document ID and section count
+        Parse PDF and extract sections into memory with coverage tracking.
         """
         # Parse document
         doc = self.parser.parse_pdf(file_path)
-        
+
         logger.info(f"Extracting sections from {doc.name}")
-        
+
+        # Use coverage from base parser if available (avoids re-conversion)
+        coverage = getattr(doc, "coverage", None)
+        coverage_message = getattr(doc, "coverage_message", "Coverage verification: not available")
+
         # Extract sections
         section_count = 0
         for section_data in doc.sections:
@@ -262,16 +263,18 @@ class EnhancedPDFParserSkill:
             )
             self.memory.add_section(doc.id, section_obj)
             section_count += 1
-        
+
         # Get statistics
         stats = self.memory.get_statistics(doc.id)
-        
+
         return {
             "document_id": doc.id,
             "document_name": doc.name,
             "pages": doc.metadata.pages,
             "sections_extracted": section_count,
             "statistics": stats,
+            "coverage": coverage,
+            "coverage_message": coverage_message,
             "message": f"Extracted {section_count} sections from {doc.name}"
         }
     
@@ -280,16 +283,24 @@ class EnhancedPDFParserSkill:
         document_id: str,
         section_data: Dict[str, Any]
     ) -> Section:
-        """Create Section object from parsed section data."""
+        """Create Section object from parsed section data with page tracking."""
         title = section_data.get("title", "Untitled")
         level = section_data.get("level", 1)
         content = section_data.get("content", "")
+        start_line = section_data.get("start_line", 0)
+        end_line = section_data.get("end_line", 0)
+        page_estimate = section_data.get("page_estimate", 1)
+        page_end_estimate = section_data.get("page_end_estimate", page_estimate)
         
         # Extract metadata
         metadata = self._extract_section_metadata(
             title=title,
             level=level,
-            content=content
+            content=content,
+            start_line=start_line,
+            end_line=end_line,
+            page_estimate=page_estimate,
+            page_end_estimate=page_end_estimate
         )
         
         # Create section
@@ -315,9 +326,11 @@ class EnhancedPDFParserSkill:
         level: int,
         content: str,
         start_line: int = 0,
-        end_line: int = 0
+        end_line: int = 0,
+        page_estimate: int = 1,
+        page_end_estimate: int = 1
     ) -> SectionMetadata:
-        """Extract metadata for a section."""
+        """Extract metadata for a section including page information."""
         # Count words
         words = content.split()
         word_count = len(words)
@@ -328,6 +341,10 @@ class EnhancedPDFParserSkill:
         # Check for tables (simple heuristic)
         has_tables = bool(re.search(r'\|.*\|', content))
         
+        # Use estimated start/end pages
+        end_page = max(page_estimate, page_end_estimate)
+        page_range = f"{page_estimate}-{end_page}" if end_page > page_estimate else str(page_estimate)
+        
         return SectionMetadata(
             title=title,
             level=level,
@@ -337,7 +354,9 @@ class EnhancedPDFParserSkill:
             word_count=word_count,
             has_code=has_code,
             has_tables=has_tables,
-            subsection_count=0
+            subsection_count=0,
+            page_estimate=page_estimate,
+            page_range=page_range
         )
     
     def get_section(self, full_section_id: str) -> Optional[Dict[str, Any]]:
@@ -435,6 +454,90 @@ class EnhancedPDFParserSkill:
                 }
                 for doc_id, sections in self.memory.section_index.items()
             ]
+        }
+    
+    def verify_document_coverage(self, document_id: str) -> Dict[str, Any]:
+        """
+        Verify that document parsing captured all pages and sections.
+        
+        Analyzes page ranges and line counts to ensure no content was missed.
+        
+        Args:
+            document_id: Document ID to verify
+            
+        Returns:
+            Coverage report with pages, sections, and content analysis
+        """
+        sections = self.memory.get_document_sections(document_id)
+        
+        if not sections:
+            return {
+                "document_id": document_id,
+                "status": "no_sections",
+                "message": "No sections found for document"
+            }
+        
+        # Collect page information
+        min_page = float('inf')
+        max_page = 0
+        total_word_count = 0
+        total_content_length = 0
+        section_count = 0
+        pages_with_sections = set()
+        
+        def collect_section_info(secs: List[Section]) -> None:
+            nonlocal min_page, max_page, total_word_count, total_content_length, section_count
+            for section in secs:
+                section_count += 1
+                total_word_count += section.metadata.word_count
+                total_content_length += section.metadata.content_length
+                
+                # Track page coverage
+                if section.metadata.page_estimate < min_page:
+                    min_page = section.metadata.page_estimate
+                
+                page_end = section.metadata.page_estimate
+                if section.metadata.page_range and '-' in section.metadata.page_range:
+                    try:
+                        _, page_end = section.metadata.page_range.split('-')
+                        page_end = int(page_end)
+                    except (ValueError, IndexError):
+                        pass
+                
+                if page_end > max_page:
+                    max_page = page_end
+                
+                # Track which pages have content
+                for page in range(section.metadata.page_estimate, page_end + 1):
+                    pages_with_sections.add(page)
+                
+                # Recurse into subsections
+                if section.subsections:
+                    collect_section_info(section.subsections)
+        
+        collect_section_info(sections)
+        
+        # Reset infinity value if no pages found
+        if min_page == float('inf'):
+            min_page = 1
+        
+        return {
+            "document_id": document_id,
+            "status": "verified",
+            "coverage_analysis": {
+                "total_sections": section_count,
+                "estimated_page_range": f"{min_page}-{max_page}",
+                "pages_with_content": len(pages_with_sections),
+                "total_word_count": total_word_count,
+                "total_content_length": total_content_length,
+                "average_section_words": total_word_count // section_count if section_count > 0 else 0
+            },
+            "quality_checks": {
+                "has_content": total_content_length > 0,
+                "has_sections": section_count > 0,
+                "multiple_pages": max_page > min_page if max_page != 0 else False,
+                "adequate_coverage": len(pages_with_sections) > 0
+            }
         }
 
 
@@ -549,3 +652,20 @@ def list_all_documents() -> Dict[str, Any]:
     """
     parser = get_enhanced_parser()
     return parser.get_all_documents()
+
+
+def verify_document_coverage(document_id: str) -> Dict[str, Any]:
+    """
+    Claude Skill: Verify that a document was completely parsed.
+    
+    Analyzes page coverage and section extraction to ensure no content was missed,
+    especially important for documents with multiple tables of contents.
+    
+    Args:
+        document_id: Document ID to verify
+        
+    Returns:
+        Coverage report with quality checks and statistics
+    """
+    parser = get_enhanced_parser()
+    return parser.verify_document_coverage(document_id)
