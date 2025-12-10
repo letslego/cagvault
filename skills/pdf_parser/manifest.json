@@ -1,0 +1,201 @@
+{
+  "name": "pdf-parser",
+  "version": "1.0.0",
+  "displayName": "PDF Document Parser",
+  "description": "Parse PDF documents and extract structured content including text, metadata, sections, and tables. Integrates with CAG for intelligent document analysis.",
+  "author": "CAG Skills Team",
+  "license": "MIT",
+  "keywords": ["pdf", "document-parsing", "extraction", "markdown", "text", "docling"],
+  
+  "capabilities": [
+    "parse-pdf",
+    "extract-metadata",
+    "search-content",
+    "table-extraction",
+    "structure-analysis",
+    "cag-integration"
+  ],
+  
+  "functions": [
+    {
+      "name": "parse_document",
+      "description": "Parse a PDF document and extract structured content with metadata, sections, and tables",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file to parse"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Structured document with metadata, sections, tables, and content"
+      }
+    },
+    {
+      "name": "parse_web_content",
+      "description": "Parse content from a URL (HTML to Markdown conversion)",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "URL to parse"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Structured document with extracted content"
+      }
+    },
+    {
+      "name": "search_document",
+      "description": "Search for query terms within a parsed document",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search term or phrase"
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "List of matching lines with line numbers and context"
+      }
+    },
+    {
+      "name": "get_document_metadata",
+      "description": "Extract metadata from a document (title, author, pages, etc.)",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Document metadata dictionary"
+      }
+    },
+    {
+      "name": "claude_parse_pdf",
+      "description": "Parse PDF and get comprehensive info ready for CAG integration",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Complete document info with metadata, structure, and summary"
+      }
+    },
+    {
+      "name": "claude_ingest_pdf",
+      "description": "Parse PDF and add to CAG knowledge base",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Confirmation with document ID and storage details"
+      }
+    },
+    {
+      "name": "claude_search_pdf",
+      "description": "Search within a PDF document stored in CAG",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        },
+        "query": {
+          "type": "string",
+          "description": "What to search for"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Search results with context"
+      }
+    },
+    {
+      "name": "claude_get_structure",
+      "description": "Extract table of contents and hierarchical structure",
+      "parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to the PDF file"
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Document structure with sections and TOC"
+      }
+    }
+  ],
+  
+  "dependencies": {
+    "python": ">=3.10",
+    "packages": [
+      "docling>=2.64.1",
+      "transformers",
+      "langchain",
+      "pydantic"
+    ]
+  },
+  
+  "configuration": {
+    "cache_dir": ".cache/documents",
+    "supported_formats": ["pdf", "html"],
+    "max_document_size": "100MB",
+    "timeout_seconds": 300
+  },
+  
+  "usage_examples": [
+    {
+      "description": "Basic PDF parsing",
+      "command": "parse_document('/path/to/document.pdf')"
+    },
+    {
+      "description": "Parse and integrate with CAG",
+      "command": "claude_ingest_pdf('/path/to/document.pdf')"
+    },
+    {
+      "description": "Search within document",
+      "command": "claude_search_pdf('/path/to/document.pdf', 'covenant breach')"
+    },
+    {
+      "description": "Get document structure",
+      "command": "claude_get_structure('/path/to/document.pdf')"
+    },
+    {
+      "description": "Parse web content",
+      "command": "parse_web_content('https://example.com/document.pdf')"
+    }
+  ],
+  
+  "integrations": {
+    "cag": {
+      "enabled": true,
+      "knowledge_source": "document",
+      "credit_analyst": true,
+      "kv_cache": true
+    },
+    "ollama": {
+      "enabled": true,
+      "model": "qwen3-0.6b"
+    }
+  },
+  
+  "performance": {
+    "average_parsing_time_per_mb": "2-5 seconds",
+    "cache_hit_speed": "<100ms",
+    "batch_processing_max": 10,
+    "memory_efficient": true
+  }
+}

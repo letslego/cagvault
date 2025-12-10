@@ -27,6 +27,8 @@ if "upload_counter" not in st.session_state:
     st.session_state.upload_counter = 0
 if "context_cache_id" not in st.session_state:
     st.session_state.context_cache_id = None
+if "message_source_ids" not in st.session_state:
+    st.session_state.message_source_ids = set()
     
 with st.sidebar:
     st.title("CAG Vault")
@@ -58,6 +60,8 @@ with st.sidebar:
         st.info(f"CAG is learning from {uploaded_file.name}...")
         source = load_from_file(uploaded_file.name, uploaded_file.read())
         st.session_state.sources[source.id] = source
+        # Update messages to reference only the new documents
+        st.session_state.message_source_ids = {source.id}
         # Invalidate cache when sources change
         st.session_state.context_cache_id = None
         st.rerun()
@@ -67,7 +71,7 @@ with st.sidebar:
     with st.form(key="add_url_form", clear_on_submit=True):
         url_input = st.text_input(
             "Or, paste a Web Page Link (URL)",
-            placeholder="e.g., https://agenticknowhow.com",
+            placeholder="e.g., https://nammu21.com",
         )
         submit = st.form_submit_button("Add Web Page")
         if submit:
@@ -75,6 +79,8 @@ with st.sidebar:
                 st.info(f"CAG is learning from {url_input}...")
                 source = load_from_url(url_input)
                 st.session_state.sources[source.id] = source
+                # Update messages to reference only the new documents
+                st.session_state.message_source_ids = {source.id}
                 # Invalidate cache when sources change
                 st.session_state.context_cache_id = None
                 st.rerun()
@@ -103,6 +109,8 @@ with st.sidebar:
                         source_to_delete = source_id
         if source_to_delete:
             delete_source(source_to_delete)
+            st.session_state.message_source_ids.discard(source_to_delete)
+            st.session_state.context_cache_id = None
             st.rerun()
 if not st.session_state.sources:
     st.info("Add your documents in the sidebar to start chatting", icon="👈")
@@ -130,6 +138,8 @@ elif st.session_state.sources:
         disabled=not chat_enabled,
     ):
         st.session_state.messages.append({"role": "user", "content": prompt, "thinking": None})
+        # Update message source IDs to current documents
+        st.session_state.message_source_ids = set(st.session_state.sources.keys())
         st.rerun()
 
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
@@ -143,7 +153,12 @@ elif st.session_state.sources:
             llm = create_chatbot()
             query = st.session_state.messages[-1]["content"]
             history = st.session_state.messages[:-1]
-            for chunk_data in ask(query, history, st.session_state.sources, llm):
+            # Filter sources to only include current message document references
+            filtered_sources = {
+                sid: source for sid, source in st.session_state.sources.items() 
+                if sid in st.session_state.message_source_ids
+            }
+            for chunk_data in ask(query, history, filtered_sources, llm):
                 chunk_type = chunk_data.type
                 chunk_content = chunk_data.content
  
