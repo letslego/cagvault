@@ -38,7 +38,15 @@ from .enhanced_parser import (
     list_all_documents,
 )
 
-__version__ = "1.1.0"
+from .toc_parser import (
+    TOCParseResult,
+    parse_pdf_with_toc,
+    get_toc_sections,
+    list_toc_documents,
+    TOC_PARSER_AVAILABLE,
+)
+
+__version__ = "1.2.0"
 __author__ = "CAG Skills Team"
 __all__ = [
     # Basic parser
@@ -48,6 +56,13 @@ __all__ = [
     "get_pdf_parser_skill",
     "parse_document",
     "parse_web_content",
+    
+    # TOC-based parser
+    "TOCParseResult",
+    "parse_pdf_with_toc",
+    "get_toc_sections",
+    "list_toc_documents",
+    "TOC_PARSER_AVAILABLE",
     "search_document",
     "get_document_metadata",
     # Integration
