@@ -45,7 +45,8 @@ with st.sidebar:
                 st.rerun()
     
     st.markdown("---")
-
+    
+    uploaded_file = st.file_uploader(
         "Upload a Document",
         type=Config.UI.ALLOWED_FILE_TYPES,
         accept_multiple_files=False,
@@ -110,7 +111,6 @@ elif st.session_state.sources:
     if st.session_state.context_cache_id is None:
         with st.spinner("🔄 Caching context for faster queries..."):
             st.session_state.context_cache_id = create_context_cache(st.session_state.sources)
-        st.success("✅ Context cached! Ready for questions.", duration=2)
     
     for message in st.session_state.messages:
         avatar_icon = "🤖" if message["role"] == "assistant" else "🐧"
