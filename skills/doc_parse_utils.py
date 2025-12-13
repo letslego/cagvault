@@ -27,6 +27,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc.document import SectionHeaderItem, TableItem, TextItem, ListItem
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
+from config import Config
 
 # Regex patterns for section detection (inline definitions to avoid external dependencies)
 re_sec_roman = re.compile(r'^\s*\([ivxlcdm]+\)', re.IGNORECASE)
@@ -80,9 +81,12 @@ try:
     # Use Qwen3-14B for both tasks (high quality local model)
     llm_sonnet = ChatOllama(
         model="hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL",
+        base_url=Config.OLLAMA_BASE_URL,
         temperature=0.0,
         num_ctx=8192,
         keep_alive=-1,
+        num_parallel=Config.OLLAMA_NUM_PARALLEL,
+        timeout=Config.REQUEST_TIMEOUT,
     )
     LLM_SONNET_AVAILABLE = True
     logger.info("✓ Local LLM (Qwen3-14B) initialized for detailed parsing")
@@ -95,9 +99,12 @@ try:
     # Use same model for faster tasks (can be swapped to a lighter model if needed)
     llm_haiku = ChatOllama(
         model="hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL",
+        base_url=Config.OLLAMA_BASE_URL,
         temperature=0.0,
         num_ctx=8192,
         keep_alive=-1,
+        num_parallel=Config.OLLAMA_NUM_PARALLEL,
+        timeout=Config.REQUEST_TIMEOUT,
     )
     LLM_HAIKU_AVAILABLE = True
     logger.info("✓ Local LLM (Qwen3-14B) initialized for quick tasks")
@@ -316,9 +323,13 @@ def parse_pdf_by_toc(
     # Process each item in the document
     for item_idx, (item, level) in enumerate(all_items):
 
-        # Track page numbers
+        # Get page number for this item
+        page_no = None
         if hasattr(item, 'prov') and item.prov and len(item.prov) > 0:
             page_no = item.prov[0].page_no
+
+        # Track page numbers for current section
+        if page_no is not None:
             if current_page_start is None:
                 current_page_start = page_no
             current_page_end = page_no
@@ -329,9 +340,7 @@ def parse_pdf_by_toc(
 
         if isinstance(item, SectionHeaderItem):
             # Get the page number for this header
-            header_page = None
-            if hasattr(item, 'prov') and item.prov and len(item.prov) > 0:
-                header_page = item.prov[0].page_no
+            header_page = page_no
 
             # DEBUG: Always print when we encounter a section header
             header_preview = item.text[:60] + "..." if len(item.text) > 60 else item.text
@@ -431,14 +440,15 @@ def parse_pdf_by_toc(
 
         # Handle section boundary
         if is_new_section and new_section_title:
-            # Save previous section
+            # Save previous section with its page range
             save_current_section()
 
             # Start new section
             current_section_title = new_section_title
             current_content = [f"{new_section_title}\n{'='*len(new_section_title)}\n"]
-            current_page_start = None
-            current_page_end = None
+            # IMPORTANT: Set start page to current page for this new section header
+            current_page_start = page_no  # The page where this header appears
+            current_page_end = page_no
 
         # Add content to current section
         else:

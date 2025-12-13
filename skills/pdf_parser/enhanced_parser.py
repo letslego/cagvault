@@ -6,11 +6,16 @@ Includes metadata extraction, full-text search, and named entity recognition.
 """
 
 import hashlib
+import json
+import os
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 import logging
 import re
+import sys
+from pathlib import Path
+import redis 
 
 from .ner_search import NamedEntityRecognizer, FullTextSearchEngine, EnhancedSearchableParser
 from .credit_analyst_prompt import get_credit_analyst
@@ -96,6 +101,15 @@ class SectionMemoryStore:
         # Metadata index: {full_section_id: SectionMetadata}
         self.metadata_index: Dict[str, SectionMetadata] = {}
         logger.info("SectionMemoryStore initialized")
+
+    def clear_document(self, document_id: str) -> None:
+        """Remove all stored sections for a document to prevent duplication."""
+        self.documents.pop(document_id, None)
+        self.section_index.pop(document_id, None)
+        self.metadata_index = {
+            k: v for k, v in self.metadata_index.items()
+            if not k.startswith(f"{document_id}#")
+        }
     
     def add_section(
         self,
@@ -245,18 +259,424 @@ class EnhancedPDFParserSkill:
         from skills.pdf_parser.pdf_parser import PDFParserSkill
         self.parser = PDFParserSkill()
         self.memory = SectionMemoryStore()
-        self.search_parser = EnhancedSearchableParser()
-        logger.info("EnhancedPDFParserSkill initialized with section memory, search, and NER")
+        self.search_parser = EnhancedSearchableParser(llm=None)  # Agentic uses Claude SDK directly
+        self.redis_client = self._init_redis()
+        logger.info("EnhancedPDFParserSkill initialized with section memory, search (keyword/semantic/agentic), and NER")
+
+    def _init_redis(self):
+        """Create Redis client if Redis is available."""
+        try:
+            # Try to use REDIS_URL if set, otherwise use default localhost
+            url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            if redis is None:
+                return None
+            client = redis.Redis.from_url(url)
+            client.ping()
+            logger.info("Redis client initialized")
+            return client
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Redis unavailable: {exc}")
+            return None
     
     def parse_and_extract_sections(self, file_path: str) -> Dict[str, Any]:
         """
         Parse PDF and extract sections into memory with coverage tracking.
+        
+        Uses LLM to intelligently detect sections and track accurate page ranges.
         """
-        # Parse document
+        # Short-circuit if already cached in Redis using the same document id as the parser cache key
+        document_id: Optional[str] = None
+        if self.redis_client:
+            cache_key = self.parser._generate_cache_key(str(file_path))
+            document_id = f"pdf_{cache_key}"
+            cached = self._load_document_from_redis(document_id)
+            if cached:
+                return cached
+        
+        # Parse document using standard parser
         doc = self.parser.parse_pdf(file_path)
+        document_id = document_id or doc.id
+
+        # Clear any existing in-memory copy before adding fresh sections
+        self.memory.clear_document(document_id)
 
         logger.info(f"Extracting sections from {doc.name}")
 
+        # Use LLM-based extraction with parallel processing for speed
+        return self._extract_sections_with_llm(doc, file_path)
+    
+    def _extract_sections_with_llm(self, doc: "ParsedDocument", file_path: str) -> Dict[str, Any]:
+        """
+        Extract sections using LLM-enhanced markdown parsing with parallel processing.
+        
+        Uses the markdown-based section extraction to get granular sections,
+        then uses LLM to assign accurate page ranges using concurrent requests.
+        """
+        from langchain_ollama import ChatOllama
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from config import Config
+        import json
+        
+        # Initialize LLM with correct model name - single instance handles concurrent requests
+        llm = ChatOllama(
+            model="hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL",
+            base_url=Config.OLLAMA_BASE_URL,
+            temperature=0.0,
+            top_k=2,
+            num_ctx=4096,  # Context window
+            num_parallel=Config.OLLAMA_NUM_PARALLEL,  # Enable concurrent requests
+            timeout=Config.REQUEST_TIMEOUT,
+        )
+        
+        markdown_content = doc.content
+        total_pages = doc.metadata.pages
+        sections_from_markdown = doc.sections
+        
+        # Skip slow page range LLM call - use fast word-based estimation
+        # This is accurate enough and avoids a blocking LLM call
+        logger.info(f"Using fast word-based page estimation for {len(sections_from_markdown)} sections")
+        page_ranges = {}
+        
+        # Create sections with improved page tracking
+        section_count = 0
+        current_page = 1
+        
+        for section_data in sections_from_markdown:
+            title = section_data.get("title", "Untitled")
+            content = section_data.get("content", "")
+            
+            # Get page range from LLM if available
+            if title in page_ranges:
+                start_page, end_page = page_ranges[title]
+                # Update current_page to continue from where this section ends
+                current_page = end_page + 1
+            else:
+                # Estimate pages: ~250 words per page
+                word_count = len(content.split()) if content else 0
+                pages_needed = max(1, word_count // 250)
+                start_page = current_page
+                end_page = min(total_pages, current_page + pages_needed - 1)
+                current_page = end_page + 1
+            
+            # Ensure valid page range
+            start_page = max(1, min(start_page, total_pages))
+            end_page = max(start_page, min(end_page, total_pages))
+            # Always update current_page to ensure no gaps
+            current_page = end_page + 1
+            
+            # Create section metadata
+            word_count = len(content.split()) if content else 0
+            metadata = SectionMetadata(
+                title=title,
+                level=section_data.get("level", 1),
+                start_line=section_data.get("start_line", 0),
+                end_line=section_data.get("end_line", 0),
+                content_length=len(content),
+                word_count=word_count,
+                has_code=False,
+                has_tables="table" in content.lower() or "|" in content,
+                subsection_count=len(section_data.get("subsections", [])),
+                page_estimate=start_page,
+                page_range=f"{start_page}-{end_page}",
+                start_page=start_page,
+                end_page=end_page,
+                section_type="OTHER",
+                importance_score=0.5,
+                typical_dependencies=[]
+            )
+            
+            # Skip detailed analysis during initial upload for speed
+            # Sections will be analyzed on-demand when user asks questions
+            # This avoids blocking Streamlit with N LLM calls
+            
+            # Create and add section
+            section = Section(
+                metadata=metadata,
+                content=content,
+                document_id=doc.id,
+                subsections=[]
+            )
+            self.memory.add_section(doc.id, section)
+            section_count += 1
+        
+        # Batch analyze section importance in parallel using ThreadPoolExecutor
+        logger.info(f"Starting parallel importance analysis for {section_count} sections...")
+        all_sections = self.memory.get_document_sections(doc.id)
+        self._batch_analyze_sections_parallel(all_sections, max_workers=4)
+        
+        # Index for search and NER before persistence
+        self._index_sections(doc.id, self.memory.get_document_sections(doc.id))
+
+        # Persist to Redis if available
+        self._store_document_in_redis(
+            document_id=doc.id,
+            document_name=doc.name,
+            total_pages=total_pages,
+            extraction_method="llm_enhanced_markdown",
+            sections=self.memory.get_document_sections(doc.id)
+        )
+        
+        return {
+            "document_id": doc.id,
+            "document_name": doc.name,
+            "pages": total_pages,
+            "sections_extracted": section_count,
+            "extraction_method": "llm_enhanced_markdown",
+            "message": f"Extracted {section_count} sections with parallel LLM analysis"
+        }
+    
+    def _batch_analyze_sections_parallel(self, sections: List[Section], max_workers: int = 4) -> None:
+        """
+        Analyze section importance in parallel using ThreadPoolExecutor.
+        
+        Args:
+            sections: List of sections to analyze
+            max_workers: Number of parallel worker threads (default 4)
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def analyze_single_section(section: Section) -> tuple:
+            """Analyze a single section and return (section, analysis)."""
+            try:
+                analyst = get_credit_analyst()
+                analysis = analyst.analyze_section_importance(
+                    section.metadata.title,
+                    section.content,
+                    section.metadata.level
+                )
+                return (section, analysis)
+            except Exception as e:
+                logger.warning(f"Failed to analyze section {section.metadata.title}: {e}")
+                return (section, {
+                    "classification": "OTHER",
+                    "importance_score": 0.5,
+                    "typical_dependencies": []
+                })
+        
+        # Flatten sections to include subsections
+        all_sections = self._flatten_sections(sections)
+        
+        # Process sections in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_section = {
+                executor.submit(analyze_single_section, section): section 
+                for section in all_sections
+            }
+            
+            # Collect results as they complete
+            completed = 0
+            for future in as_completed(future_to_section):
+                section, analysis = future.result()
+                # Update section metadata with analysis results
+                section.metadata.section_type = analysis.get("classification", "OTHER")
+                section.metadata.importance_score = analysis.get("importance_score", 0.5)
+                section.metadata.typical_dependencies = analysis.get("typical_dependencies", [])
+                
+                completed += 1
+                if completed % 10 == 0:
+                    logger.info(f"Analyzed {completed}/{len(all_sections)} sections...")
+        
+        logger.info(f"✓ Completed parallel analysis of {len(all_sections)} sections")
+
+    def _store_document_in_redis(
+        self,
+        document_id: str,
+        document_name: str,
+        total_pages: int,
+        extraction_method: str,
+        sections: List[Section]
+    ) -> None:
+        """Store document metadata, sections, and subsections in Redis (idempotent)."""
+        if not self.redis_client:
+            return
+        try:
+            meta_key = f"doc:{document_id}:meta"
+            sections_key = f"doc:{document_id}:sections"
+            section_ids_key = f"doc:{document_id}:section_ids"
+            sections_full_key = f"doc:{document_id}:sections_full"
+            doc_keywords_key = f"doc:{document_id}:keywords"
+            doc_entities_key = f"doc:{document_id}:entities"
+            all_sections = self._flatten_sections(sections)
+            # Metadata
+            meta_payload = {
+                "document_id": document_id,
+                "document_name": document_name,
+                "pages": total_pages,
+                "extraction_method": extraction_method,
+                "stored_at": datetime.now().isoformat()
+            }
+            self.redis_client.set(meta_key, json.dumps(meta_payload))
+            # Sections and subsections
+            pipe = self.redis_client.pipeline()
+            pipe.delete(section_ids_key)
+            pipe.delete(doc_keywords_key)
+            pipe.delete(doc_entities_key)
+            pipe.delete(sections_full_key)
+
+            doc_keywords: set[str] = set()
+            doc_entities: List[Dict[str, Any]] = []
+            all_payloads: List[Dict[str, Any]] = []
+            for section in all_sections:
+                sid = section.metadata.id
+                sec_key = f"doc:{document_id}:section:{sid}"
+                # Derive keywords and entities from search/NER index
+                keywords = self.search_parser.search_engine._tokenize(section.content) if self.search_parser else []
+                entities = self.search_parser.get_section_entities(sid)
+                doc_keywords.update(keywords)
+                for ent in entities:
+                    ent_with_section = dict(ent)
+                    ent_with_section["section_id"] = sid
+                    doc_entities.append(ent_with_section)
+                payload = {
+                    "id": sid,
+                    "title": section.metadata.title,
+                    "level": section.metadata.level,
+                    "parent_id": section.metadata.parent_id,
+                    "content": section.content,
+                    "metadata": asdict(section.metadata),
+                    "document_id": document_id,
+                    "keywords": keywords,
+                    "entities": entities,
+                }
+                pipe.set(sec_key, json.dumps(payload))
+                pipe.rpush(section_ids_key, sid)
+                all_payloads.append(payload)
+            # Keep ordered list of sections + subsections
+            pipe.set(sections_key, json.dumps([s.metadata.id for s in all_sections]))
+            pipe.set(sections_full_key, json.dumps(all_payloads))
+            pipe.set(doc_keywords_key, json.dumps(sorted(doc_keywords)))
+            pipe.set(doc_entities_key, json.dumps(doc_entities))
+            pipe.execute()
+            logger.info(f"Stored document {document_id} with {len(all_sections)} sections in Redis")
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Failed to store in Redis: {exc}")
+
+    def _load_document_from_redis(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Load document metadata and sections from Redis into memory.
+
+        Returns cached stats dict matching the parse response shape or None on miss.
+        """
+        if not self.redis_client:
+            return None
+
+        meta_key = f"doc:{document_id}:meta"
+        sections_key = f"doc:{document_id}:sections"
+        section_ids_key = f"doc:{document_id}:section_ids"
+
+        try:
+            meta_raw = self.redis_client.get(meta_key)
+            if not meta_raw:
+                return None
+
+            meta = json.loads(meta_raw)
+
+            # Skip rehydration if sections are already in memory to avoid duplicate adds/logs
+            existing_sections = self.memory.get_document_sections(document_id)
+            if existing_sections:
+                logger.info(
+                    f"Document {document_id} already hydrated in memory; skipping Redis reload"
+                )
+                return {
+                    "document_id": document_id,
+                    "document_name": meta.get("document_name", ""),
+                    "pages": meta.get("pages", 0),
+                    "sections_extracted": len(existing_sections),
+                    "extraction_method": meta.get("extraction_method", "redis_cache"),
+                    "message": "Document already in memory; skipped Redis reload",
+                }
+
+            # Clear any existing in-memory copy for this document to avoid duplication
+            self.memory.clear_document(document_id)
+
+            # Retrieve ordered section ids; fall back to stored list value if list is empty
+            section_ids = [
+                sid.decode("utf-8") if isinstance(sid, (bytes, bytearray)) else sid
+                for sid in self.redis_client.lrange(section_ids_key, 0, -1)
+            ]
+            if not section_ids:
+                stored_list = self.redis_client.get(sections_key)
+                if stored_list:
+                    section_ids = json.loads(stored_list)
+
+            section_map: Dict[str, Section] = {}
+            for sid in section_ids:
+                sec_raw = self.redis_client.get(f"doc:{document_id}:section:{sid}")
+                if not sec_raw:
+                    continue
+                payload = json.loads(sec_raw)
+                metadata_dict = payload.get("metadata", {}) or {}
+                # Ensure optional list fields are not None
+                metadata_dict["typical_dependencies"] = metadata_dict.get("typical_dependencies") or []
+                meta_obj = SectionMetadata(**metadata_dict)
+                meta_obj.id = payload.get("id", sid)
+                section = Section(
+                    metadata=meta_obj,
+                    content=payload.get("content", ""),
+                    document_id=document_id,
+                    subsections=[]
+                )
+                section_map[meta_obj.id] = section
+
+            # Rebuild hierarchy and repopulate memory store in the original order
+            root_sections: List[Section] = []
+            for sid in section_ids:
+                section = section_map.get(sid)
+                if not section:
+                    continue
+                parent_id = section.metadata.parent_id
+                if parent_id and parent_id in section_map:
+                    section_map[parent_id].subsections.append(section)
+                else:
+                    root_sections.append(section)
+                self.memory.add_section(document_id, section, parent_id=parent_id)
+
+            # Re-index for search and NER
+            self._index_sections(document_id, root_sections)
+
+            logger.info(f"Loaded document {document_id} from Redis cache")
+            return {
+                "document_id": document_id,
+                "document_name": meta.get("document_name", ""),
+                "pages": meta.get("pages", 0),
+                "sections_extracted": len(section_ids),
+                "extraction_method": meta.get("extraction_method", "redis_cache"),
+                "message": "Loaded document from Redis cache (skipped parsing)",
+            }
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Failed to load from Redis: {exc}")
+            return None
+
+    def load_document_from_redis(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Public wrapper to hydrate a document from Redis cache."""
+        return self._load_document_from_redis(document_id)
+    
+    def _annotate_with_pages(self, markdown_content: str, total_pages: int) -> str:
+        """
+        Annotate markdown content with approximate page boundaries.
+        
+        Helps LLM understand where pages break in the document.
+        """
+        lines = markdown_content.split('\n')
+        lines_per_page = len(lines) / total_pages if total_pages > 0 else 1
+        
+        annotated = []
+        for i, line in enumerate(lines):
+            current_page = int(i / lines_per_page) + 1
+            if i % int(lines_per_page) == 0 and i > 0:
+                annotated.append(f"\n--- PAGE {current_page} ---\n")
+            annotated.append(line)
+        
+        # Truncate if too long for LLM context
+        result = '\n'.join(annotated)
+        max_chars = 8000  # Leave room for prompt
+        if len(result) > max_chars:
+            result = result[:max_chars] + f"\n... [document continues for {total_pages} pages total] ..."
+        
+        return result
+    
+    def _extract_sections_from_markdown(self, doc: "ParsedDocument") -> Dict[str, Any]:
+        """Extract sections using markdown-based approach (original method)."""
         # Use coverage from base parser if available (avoids re-conversion)
         coverage = getattr(doc, "coverage", None)
         coverage_message = getattr(doc, "coverage_message", "Coverage verification: not available")
@@ -270,6 +690,9 @@ class EnhancedPDFParserSkill:
             )
             self.memory.add_section(doc.id, section_obj)
             section_count += 1
+
+        # Index for search and NER before persistence
+        self._index_sections(doc.id, self.memory.get_document_sections(doc.id))
 
         # Get statistics
         stats = self.memory.get_statistics(doc.id)
@@ -285,10 +708,144 @@ class EnhancedPDFParserSkill:
             "message": f"Extracted {section_count} sections from {doc.name}"
         }
     
+    def _extract_sections_with_toc(self, file_path: str) -> Dict[str, Any]:
+        """
+        Extract sections using TOC-based parsing for better granularity.
+        
+        This method uses doc_parse_utils which intelligently detects table of contents
+        and matches section headers using LLM guidance, providing:
+        - More sections (typically 30+ for credit agreements)
+        - Accurate page ranges
+        - Document type classification
+        """
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from doc_parse_utils import parse_pdf_by_toc
+        
+        import tempfile
+        import hashlib
+        
+        # Generate document ID
+        document_id = f"pdf_{hashlib.sha256(str(file_path).encode()).hexdigest()[:16]}"
+        
+        # Parse with TOC detection
+        result = parse_pdf_by_toc(
+            pdf_path=file_path,
+            output_dir=f".cache/toc_sections/{document_id}",
+            generate_summaries=False,
+            use_llm_matching=False,  # Use fuzzy for speed
+            debug_toc=False
+        )
+        
+        # Extract sections metadata
+        sections_metadata = result.get("sections_metadata", {})
+        doc_classification = result.get("doc_classification", {})
+        total_pages = result.get("total_pages", 0)
+        
+        # Convert to Section objects
+        section_count = 0
+        for section_id, section_meta in sections_metadata.items():
+            # Parse page range
+            page_range_str = section_meta.get("page_range", "1-1")
+            try:
+                start_page, end_page = map(int, page_range_str.split("-"))
+            except (ValueError, AttributeError):
+                start_page, end_page = 1, 1
+            
+            # Get content from file or metadata
+            content = section_meta.get("content", "")
+            if not content:
+                content_path = Path(section_meta.get("file_path", ""))
+                if content_path.exists():
+                    try:
+                        with open(content_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                    except Exception as e:
+                        logger.warning(f"Failed to read section content: {e}")
+            
+            # Create section metadata
+            word_count = len(content.split()) if content else 0
+            metadata = SectionMetadata(
+                title=section_meta.get("title", f"Section {section_count+1}"),
+                level=1,
+                start_line=0,
+                end_line=len(content.split('\n')) if content else 0,
+                content_length=len(content),
+                word_count=word_count,
+                has_code=False,
+                has_tables="table" in content.lower() or "|" in content,
+                subsection_count=0,
+                page_estimate=start_page,
+                page_range=page_range_str,
+                start_page=start_page,
+                end_page=end_page,
+            )
+            
+            # Store basic metadata now, will batch analyze later
+            metadata.section_type = "OTHER"
+            metadata.importance_score = 0.5
+            metadata.typical_dependencies = []
+            
+            # Create and add section
+            section = Section(
+                metadata=metadata,
+                content=content,
+                document_id=document_id,
+                subsections=[]
+            )
+            self.memory.add_section(document_id, section)
+            section_count += 1
+        
+        logger.info(f"TOC extraction: {section_count} sections extracted")
+        
+        # Batch analyze sections in parallel
+        all_sections = self.memory.get_document_sections(document_id)
+        self._batch_analyze_sections_parallel(all_sections, max_workers=4)
+        
+        return {
+            "document_id": document_id,
+            "document_name": Path(file_path).name,
+            "pages": total_pages,
+            "sections_extracted": section_count,
+            "document_type": doc_classification.get("document_type", "unknown"),
+            "toc_found": result.get("toc_data", {}).get("is_toc_found", False),
+            "extraction_method": "toc_based",
+            "message": f"Extracted {section_count} sections from {Path(file_path).name} using TOC detection"
+        }
+    
+    def _flatten_sections(self, sections: List[Section]) -> List[Section]:
+        """Flatten a list of sections and subsections preserving order."""
+        flattened: List[Section] = []
+
+        def walk(section: Section) -> None:
+            flattened.append(section)
+            for child in section.subsections:
+                if child.metadata.parent_id is None:
+                    child.metadata.parent_id = section.metadata.id
+                walk(child)
+
+        for sec in sections:
+            walk(sec)
+        return flattened
+
+    def _index_sections(self, document_id: str, sections: List[Section]) -> None:
+        """Index sections (and subsections) for search and NER."""
+        if not sections:
+            return
+        flattened = self._flatten_sections(sections)
+        for section in flattened:
+            self.search_parser.index_section(
+                section_id=section.metadata.id,
+                content=section.content,
+                document_id=document_id,
+                title=section.metadata.title
+            )
+
     def _create_section_from_data(
         self,
         document_id: str,
-        section_data: Dict[str, Any]
+        section_data: Dict[str, Any],
+        parent_id: Optional[str] = None
     ) -> Section:
         """Create Section object from parsed section data with page tracking."""
         title = section_data.get("title", "Untitled")
@@ -320,12 +877,15 @@ class EnhancedPDFParserSkill:
             content=content,
             document_id=document_id
         )
+        if parent_id:
+            section.metadata.parent_id = parent_id
         
         # Process subsections
         for subsection_data in section_data.get("subsections", []):
             subsection = self._create_section_from_data(
                 document_id=document_id,
-                section_data=subsection_data
+                section_data=subsection_data,
+                parent_id=metadata.id
             )
             section.subsections.append(subsection)
         
@@ -483,6 +1043,22 @@ class EnhancedPDFParserSkill:
                 for doc_id, sections in self.memory.section_index.items()
             ]
         }
+
+    def list_redis_documents(self) -> List[Dict[str, Any]]:
+        """List documents stored in Redis (metadata only)."""
+        if not self.redis_client:
+            return []
+        docs = []
+        try:
+            for meta_key in self.redis_client.scan_iter(match="doc:*:meta"):
+                raw = self.redis_client.get(meta_key)
+                if not raw:
+                    continue
+                meta = json.loads(raw)
+                docs.append(meta)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Failed to list Redis documents: {exc}")
+        return docs
     
     def verify_document_coverage(self, document_id: str) -> Dict[str, Any]:
         """

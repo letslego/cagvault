@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import logging
+from .semantic_search import SemanticSearchEngine
+from .agentic_search import AgenticSearchEngine
 
 logger = logging.getLogger(__name__)
 
@@ -199,30 +201,40 @@ class FullTextSearchEngine:
 
 
 class EnhancedSearchableParser:
-    """Enhanced parser with search and NER capabilities."""
+    """Enhanced parser with keyword search, semantic search, agentic search (Claude LLM), and NER capabilities."""
     
-    def __init__(self):
-        """Initialize enhanced parser."""
+    def __init__(self, llm=None):
+        """Initialize enhanced parser with keyword, semantic, and agentic search.
+        
+        Args:
+            llm: Optional LangChain LLM instance for agentic search
+        """
         self.ner = NamedEntityRecognizer()
         self.search_engine = FullTextSearchEngine()
+        self.semantic_engine = SemanticSearchEngine()
+        self.agentic_engine = AgenticSearchEngine(llm=llm)
         self.section_entities: Dict[str, List[Entity]] = {}
         self.section_contents: Dict[str, str] = {}
+        self.section_titles: Dict[str, str] = {}
     
-    def index_section(self, section_id: str, content: str, document_id: str) -> Dict[str, Any]:
+    def index_section(self, section_id: str, content: str, document_id: str, title: str = "") -> Dict[str, Any]:
         """
-        Index a section with search and NER.
+        Index a section with keyword search, semantic search, agentic search, and NER.
         
         Args:
             section_id: Section ID
             content: Section content
             document_id: Document ID
+            title: Section title
             
         Returns:
             Indexing summary with entities found
         """
-        # Add to search index
+        # Add to search indices
         self.search_engine.add_section(section_id, content)
+        self.semantic_engine.add_section(section_id, content)
         self.section_contents[section_id] = content
+        self.section_titles[section_id] = title
         
         # Extract entities
         entities = self.ner.extract_entities(content, section_id, document_id)
@@ -242,7 +254,7 @@ class EnhancedSearchableParser:
     
     def full_text_search(self, query: str) -> List[Dict[str, Any]]:
         """
-        Full-text search across all sections.
+        Full-text keyword search across all sections.
         
         Args:
             query: Search query
@@ -251,6 +263,40 @@ class EnhancedSearchableParser:
             Ranked search results
         """
         return self.search_engine.search(query, self.section_contents)
+    
+    def semantic_search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        """
+        Semantic search for conceptually similar sections.
+        
+        Uses TF-IDF vectors and cosine similarity to find sections
+        semantically related to the query, even without exact keyword matches.
+        
+        Args:
+            query: Search query
+            top_k: Number of top results to return
+            
+        Returns:
+            Ranked semantic search results with similarity scores
+        """
+        return self.semantic_engine.search(query, top_k)
+    
+    def agentic_search(self, query: str, top_k: int = 5) -> Dict[str, Any]:
+        """
+        Agentic search using Claude to intelligently understand and search documents.
+        
+        Claude agent reasons about the query intent and finds the most relevant sections,
+        providing explanations for why each section is relevant.
+        
+        Args:
+            query: Search query
+            top_k: Number of top results to return
+            
+        Returns:
+            Search results with agent reasoning and explanations
+        """
+        return self.agentic_engine.search(
+            query, self.section_contents, self.section_titles, top_k
+        )
     
     def search_by_entity_type(self, document_id: str, entity_type: str) -> List[Dict[str, Any]]:
         """

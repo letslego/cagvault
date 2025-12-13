@@ -73,7 +73,15 @@ class PDFParserSkill:
     
     @staticmethod
     def _create_converter() -> DocumentConverter:
-        """Create and cache the DocumentConverter."""
+        """Create and cache the DocumentConverter with speed optimizations."""
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        
+        # Fast pipeline options - skip OCR for speed
+        pipeline_options = PdfPipelineOptions(
+            do_ocr=False,  # Skip OCR for speed (assumes text-based PDFs)
+            do_table_structure=True,  # Keep table detection with default settings
+        )
+        
         return DocumentConverter(
             allowed_formats=[
                 InputFormat.PDF,
@@ -83,6 +91,7 @@ class PDFParserSkill:
                 InputFormat.PDF: PdfFormatOption(
                     pipeline_cls=StandardPdfPipeline,
                     backend=DoclingParseV4DocumentBackend,
+                    pipeline_options=pipeline_options,
                 ),
             },
         )

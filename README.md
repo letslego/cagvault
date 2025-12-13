@@ -1,6 +1,63 @@
 # CagVault
 
-A **Cache-Augmented Generation (CAG)** application for private, local document chat using large language models with extended context windows.
+A **Cache-Augmented Generation (CAG)** application for private, local document chat using large language models with intelligent document parsing, Redis-backed caching, and credit agreement analysis capabilities.
+
+## 🚀 Quick Start (5 Minutes)
+
+```bash
+# 1. Install prerequisites
+brew install ollama redis
+brew services start ollama
+brew services start redis
+
+# 2. Clone and setup
+git clone https://github.com/letslego/cagvault.git
+cd cagvault
+python3.12 -m venv .venv312
+source .venv312/bin/activate
+pip install -e .
+
+# 3. Download LLM model (choose one based on your RAM)
+# Default (16GB RAM): Qwen3-14B
+ollama pull hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL
+# Or for best quality (64GB+ RAM): DeepSeek V3
+# ollama pull deepseek-ai/DeepSeek-V3
+# Or lightweight (8GB RAM): Llama 3.1 8B
+# ollama pull llama3.1:8b
+
+# 4. Start the app
+streamlit run app.py
+# Open http://localhost:8501 in your browser
+
+# 5. Upload a PDF and start chatting!
+```
+
+**First-Time Tips:**
+- Upload a credit agreement PDF to see section analysis in action
+- Try "💡 Suggested Questions" after parsing completes
+- Explore the "Sections" tab to see hierarchical structure
+- Use "Agentic Search" for intelligent query understanding
+
+## 🎯 What's New (December 2025)
+
+**Enhanced PDF Intelligence:**
+- 🔬 **LLM-Powered Section Analysis**: Parallel processing with credit analyst classification and importance scoring
+- 📊 **Smart Section Extraction**: Hierarchical document structure with page-accurate tracking
+- 🔍 **Multi-Modal Search**: Keyword, semantic, and agentic (Claude-powered) search within documents
+- 🏷️ **Named Entity Recognition**: Extract and index parties, dates, amounts, and legal terms
+- 📌 **Referenced Section Display**: Automatically expand cited sections in chat responses
+
+**Intelligent Caching System:**
+- 💾 **Q&A Cache**: Redis-backed answer caching per document with 24-hour TTL
+- 📚 **Question Library**: Track popular questions by category with autocomplete suggestions
+- ⚡ **KV-Cache Optimization**: 10-40x faster multi-turn conversations
+- 📈 **Cache Analytics**: Real-time statistics and per-document cache management
+
+**Credit Agreement Features:**
+- 📋 **Document Classification**: Automatic detection of covenants, defaults, and key provisions
+- 🎯 **Section Importance Scoring**: AI-driven relevance analysis for credit analysts
+- 🔗 **Cross-Reference Detection**: Track dependencies between sections
+- 📄 **Page-Accurate Citations**: Precise page ranges for every section
 
 ## What is Cache-Augmented Generation (CAG)?
 
@@ -111,21 +168,69 @@ Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You N
 - ✅ **Eliminates Retrieval Errors**: All relevant information is guaranteed to be available
 - ✅ **Perfect for Constrained Knowledge Bases**: Ideal when all documents fit in context window
 
-## Features
+## Core Features
 
-- 🔒 **Fully Local & Private**: No API keys, cloud services, or internet required
-- 📄 **Multi-Format Support**: PDF, TXT, MD files and web URLs
-- 💬 **Streaming Chat**: Real-time response generation with thinking process visibility
-- 🧠 **Extended Context**: Leverages Qwen3-14B's 8K+ context window
-- ⚡ **KV-Cache Optimization**: Precomputed context caching for 10-40x faster multi-turn queries
-- 🎨 **Modern UI**: Clean Streamlit interface with cache statistics
+### 🔒 Privacy & Security
+- **Fully Local & Private**: No API keys, cloud services, or internet required (except Redis optional)
+- **Document Control**: All processing happens on your machine
+- **Optional Redis**: Can run fully in-memory without Redis for maximum privacy
+
+### 📄 Intelligent Document Processing
+- **Enhanced PDF Parsing**: Using Docling with LLM-powered section analysis
+- **Multi-Format Support**: PDF, TXT, MD files and web URLs
+- **Hierarchical Structure**: Automatic detection of sections, subsections, and tables
+- **Named Entity Recognition**: Extract parties, dates, monetary amounts, and legal terms
+- **Page-Accurate Tracking**: Precise page ranges for every section
+
+### 🔍 Advanced Search Capabilities
+- **Keyword Search**: Fast full-text search across all sections
+- **Semantic Search**: AI-powered similarity matching
+- **Agentic Search**: Claude-driven intelligent query understanding with reasoning
+- **Entity Filtering**: Search by PARTY, DATE, MONEY, AGREEMENT, or PERCENTAGE
+
+### 💾 Intelligent Caching System
+- **Q&A Cache**: Redis-backed answer caching with automatic deduplication
+- **Question Library**: Track popular questions organized by 15+ categories
+- **KV-Cache Optimization**: 10-40x faster multi-turn conversations
+- **Cache Analytics**: Real-time statistics and granular cache management
+- **Document-Specific Caching**: Per-document cache with TTL management
+
+### 💬 Enhanced Chat Experience
+- **Streaming Responses**: Real-time generation with thinking process visibility
+- **Referenced Sections**: Auto-expand cited sections in answers
+- **Suggested Questions**: Category-based question recommendations
+- **Autocomplete Search**: Type-ahead suggestions from question library
+- **Multi-Document Context**: Chat across multiple documents simultaneously
+
+### 🎯 Credit Agreement Analysis
+- **Section Classification**: Automatic identification of COVENANTS, DEFAULTS, DEFINITIONS, etc.
+- **Importance Scoring**: AI-driven relevance analysis for credit analysts
+- **Cross-Reference Tracking**: Detect dependencies between sections
+- **Covenant Analysis**: Specialized understanding of debt agreements and financial covenants
+
+### 🧠 Extended Context & Performance
+- **Large Context Windows**: Leverages Qwen3-14B's 8K+ token capacity
+- **Concurrent Request Handling**: 4 parallel LLM workers for simultaneous requests
+- **Parallel Processing**: Concurrent LLM calls for faster document analysis (4 workers)
+- **Smart Page Estimation**: Word-based calculation for instant section mapping
+- **Memory Management**: In-memory section store with Redis persistence
+- **Connection Pooling**: Optimized Ollama connections with timeout management
 
 ## Prerequisites
 
+### Required
 - macOS (or Linux/Windows with appropriate package managers)
-- Python 3.12.x
+- Python 3.12.x or 3.14.x
 - Homebrew (for macOS)
 - At least 10GB free disk space (for the LLM model)
+- 16GB RAM recommended (8GB minimum for 7B models)
+
+### Optional
+- **Redis** (for Q&A cache and question library)
+  - Install: `brew install redis` (macOS) or `apt-get install redis` (Linux)
+  - Start: `brew services start redis` or `redis-server &`
+  - If Redis is not running, the app will fall back to memory-only caching
+  - Required for: Q&A cache, question library, persistent document sections
 
 ## Installation
 
@@ -187,52 +292,190 @@ ollama serve &
 
 Download and run the installer from [ollama.com/download](https://ollama.com/download)
 
-### 5. Download the Qwen3 Model
+### 5. Download LLM Models
 
-Pull the Qwen3-14B quantized model (~9.2GB download):
+CagVault supports multiple high-performance models optimized for RAG and document understanding. Choose based on your hardware and performance needs.
 
+#### Quick Start: Download Essential Models (Recommended)
+
+Download 3 essential models covering all use cases (~30GB):
+
+```bash
+./download_essential_models.sh
+```
+
+This installs:
+- **Qwen3-14B** (Default) - Best balance of quality and speed
+- **Llama 3.1 8B** (Lightweight) - Fast responses, low memory
+- **Phi-4** (Efficient) - Microsoft's optimized model
+
+#### Download All Models
+
+To download all 10 supported models (~200GB):
+
+```bash
+./download_models.sh
+```
+
+⚠️ **Warning**: This downloads 200GB+ and takes 2-4 hours
+
+#### Manual Model Selection
+
+Alternatively, download individual models:
+
+#### Recommended Models for RAG/Document Analysis
+
+**DeepSeek V3 (Recommended for Best Quality)** - 685B parameters, state-of-the-art reasoning:
+```bash
+ollama pull deepseek-ai/DeepSeek-V3
+```
+*Requires: 64GB+ RAM, Apple Silicon M3 Max or similar*
+
+**Qwen3-14B (Default)** - Excellent balance of quality and speed:
 ```bash
 ollama pull hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL
 ```
+*Requires: 16GB+ RAM*
 
-This will download the model to your local machine. The download may take 10-20 minutes depending on your internet speed.
+**DeepSeek R1** - Advanced reasoning for complex credit agreement queries:
+```bash
+ollama pull deepseek-ai/DeepSeek-R1
+```
+*Requires: 32GB+ RAM*
 
-**Alternative Models:**
+**Mistral Large** - Excellent long-context performance:
+```bash
+ollama pull mistral-large-latest
+```
+*Requires: 32GB+ RAM*
 
-If you want to use a different model, you can browse available models:
+**Command R+** - Cohere's RAG-optimized model:
+```bash
+ollama pull command-r-plus:latest
+```
+*Requires: 32GB+ RAM*
+
+#### Lightweight Models (8GB-16GB RAM)
+
+**Phi-4** - Microsoft's efficient 14B model:
+```bash
+ollama pull phi4:latest
+```
+
+**Llama 3.1 8B** - Fast and lightweight:
+```bash
+ollama pull llama3.1:8b
+```
+
+**Mistral Small** - Quick responses for simpler queries:
+```bash
+ollama pull mistral-small-latest
+```
+
+#### High-End Models (32GB+ RAM)
+
+**Llama 3.3 70B** - Strong reasoning:
+```bash
+ollama pull llama3.3:70b
+```
+
+**Gemma 2 27B** - Google's reasoning model:
+```bash
+ollama pull gemma2:27b
+```
+
+#### Switching Models
+
+**Option 1: Use the UI (Recommended)**
+
+1. Start the app: `streamlit run app.py`
+2. Open the sidebar
+3. Expand "🤖 Model Settings"
+4. Select your preferred model from the dropdown
+5. Click "🔄 Restart App" to apply
+
+The UI shows RAM requirements and speed for each model to help you choose.
+
+**Option 2: Edit Config File**
+
+Edit `config.py` directly:
+
+```python
+class Config:
+    MODEL = DEEPSEEK_V3  # Change from QWEN_3 to any model above
+    OLLAMA_CONTEXT_WINDOW = 8192
+```
+
+Available model constants:
+- `QWEN_3` (default) - Qwen3-14B
+- `DEEPSEEK_V3` - DeepSeek V3 (best quality)
+- `DEEPSEEK_R1` - DeepSeek R1 (advanced reasoning)
+- `MISTRAL_LARGE` - Mistral Large
+- `MISTRAL_SMALL` - Mistral Small
+- `LLAMA_3_3_70B` - Llama 3.3 70B
+- `LLAMA_3_1_8B` - Llama 3.1 8B
+- `PHI_4` - Phi-4
+- `GEMMA_2_27B` - Gemma 2 27B
+- `COMMAND_R_PLUS` - Command R+
+
+#### Browsing Available Models
 
 ```bash
+# List installed models
 ollama list
+
+# Search for models on Ollama library
+ollama search deepseek
+ollama search mistral
+ollama search llama3
+
+# Pull any model
 ollama pull <model-name>
 ```
 
-Popular alternatives:
-- `llama3.3:latest` - Llama 3.3 (default 8B)
-- `mistral:latest` - Mistral 7B
-- `qwen2.5:latest` - Qwen 2.5
+### 6. (Optional) Install and Start Redis
 
-To change the model in the app, edit `config.py`:
+Redis enables persistent Q&A caching, question library, and document section storage. The app will work without Redis but with limited caching.
 
-```python
-QWEN_3 = ModelConfig(
-    provider=ModelProvider.OLLAMA,
-    name="your-model-name-here"  # Change this
-)
+#### macOS:
+```bash
+brew install redis
+brew services start redis
 ```
 
-### 6. Verify Installation
+#### Linux:
+```bash
+sudo apt-get install redis-server
+sudo systemctl start redis
+```
+
+Verify Redis is running:
+```bash
+redis-cli ping  # Should return "PONG"
+```
+
+**Environment Configuration:**
+```bash
+# Optional: Set custom Redis URL (default is redis://localhost:6379/0)
+export REDIS_URL="redis://localhost:6379/0"
+```
+
+### 7. Verify Installation
 
 Check that everything is installed correctly:
 
 ```bash
 # Python environment
-python --version  # Should show 3.12.x
+python --version  # Should show 3.12.x or 3.14.x
 
 # Ollama service
 ollama list  # Should show your downloaded models
 
+# Redis (optional)
+redis-cli ping  # Should return "PONG" if Redis is running
+
 # Python packages
-pip list | grep -E "(streamlit|langchain|docling)"
+pip list | grep -E "(streamlit|langchain|docling|redis)"
 ```
 
 ## Running the Application
@@ -249,31 +492,117 @@ The application will open in your browser at `http://localhost:8504`
 
 ### Using the Application
 
-1. **Upload Documents** (optional):
-   - Use the sidebar file uploader to add PDF, TXT, or MD files
-   - Or enter a URL to scrape web content
+#### 1. Upload Documents
 
-2. **Start Chatting**:
-   - Type your question in the chat input at the bottom
-   - The model will process your documents (if uploaded) and generate a response
-   - Watch the thinking process unfold in real-time
+**Via File Upload:**
+- Click the file uploader in the sidebar
+- Select PDF, TXT, or MD files
+- Watch the enhanced parsing process with section extraction
+- View parsing statistics: pages, sections, entities found
 
-3. **View Responses**:
-   - Thinking blocks show the model's reasoning process
-   - Final answers appear as assistant messages
+**Via URL:**
+- Paste a web URL in the text input
+- Click "Add Web Page" to scrape and convert to text
+
+**From Redis Cache:**
+- Click "🗄️ Documents in Redis" expander
+- Select a previously parsed document
+- Click "Load for chat" to restore from cache
+
+#### 2. Explore Document Structure
+
+**Sections Tab:**
+- Browse hierarchical document structure
+- View page ranges, word counts, and table indicators
+- Click to expand section content
+- See coverage statistics (page distribution)
+
+**Search Tab:**
+- **Agentic Search**: Claude-powered intelligent search with reasoning
+- **Keyword Search**: Fast full-text search with match counts
+- **Semantic Search**: AI similarity matching with relevance scores
+
+**Entities Tab:**
+- Filter by type: MONEY, DATE, PARTY, AGREEMENT, PERCENTAGE
+- Click entities to see source sections
+- Track key document information
+
+#### 3. Ask Questions
+
+**Direct Input:**
+- Type your question in the chat input at the bottom
+- Press Enter to submit
+
+**Suggested Questions:**
+- Click "💡 Suggested Questions" to see popular queries
+- Click any suggestion to instantly ask it
+- Questions are categorized: Definitions, Parties, Financial, etc.
+
+**Browse by Category:**
+- Click "📚 Browse by Category"
+- Explore questions organized by 15+ categories
+- View document-specific or global questions
+
+#### 4. Review Responses
+
+**Chat Messages:**
+- **Thinking Process**: Expand "CAG's thoughts" to see reasoning
+- **Streaming Answers**: Watch responses generate in real-time
+- **Cache Indicator**: "💾 Using cached response" shows when answers are cached
+
+**Referenced Sections:**
+- Automatically expands sections cited in the answer
+- Click section expanders to view full content
+- Includes page ranges and section metadata
+
+**Cache Status:**
+- Green "💾 Using cached response" = instant retrieval from Redis
+- No indicator = fresh LLM generation + automatic caching
+
+#### 5. Manage Caches
+
+**Cache Stats (Sidebar):**
+- View total contexts, tokens, and cache hits
+- Clear all context cache with "🧹 Clear Cache"
+
+**Q&A Cache Management:**
+- View cached Q&A pairs per document
+- Browse questions with thinking and responses
+- Clear per-document cache or all Q&A cache
+- Monitor Redis memory usage
+
+**Question Library:**
+- Search library with autocomplete
+- View usage counts and categories
+- Delete individual questions
+- Clear entire library
 
 ## Project Structure
 
 ```
 cagvault/
-├── app.py           # Streamlit UI and main application logic
-├── config.py        # Model configuration and settings
-├── models.py        # LLM factory (creates Ollama/Groq instances)
-├── knowledge.py     # Document loading and conversion
-├── chatbot.py       # Chat logic with streaming and prompts
-├── simple_cag.py    # Simplified CAG implementation
-├── pyproject.toml   # Python dependencies
-└── README.md        # This file
+├── app.py                          # Streamlit UI with enhanced features
+├── config.py                       # Model configuration and settings
+├── models.py                       # LLM factory (Ollama/Groq)
+├── knowledge.py                    # Document loading and conversion
+├── chatbot.py                      # Chat logic with streaming and prompts
+├── kvcache.py                      # KV-Cache manager for context caching
+├── qa_cache.py                     # Redis-backed Q&A caching system
+├── question_library.py             # Question library with categorization
+├── simple_cag.py                   # Simplified CAG implementation
+├── pyproject.toml                  # Python dependencies
+├── skills/
+│   └── pdf_parser/
+│       ├── pdf_parser.py           # Core PDF parsing (Docling)
+│       ├── enhanced_parser.py      # LLM-powered section analysis
+│       ├── ner_search.py           # NER and search engines
+│       ├── credit_analyst_prompt.py # Credit analyst classification
+│       └── llm_section_evaluator.py # Section importance scoring
+├── .cache/
+│   ├── documents/                  # Parsed document cache
+│   ├── kvcache/                    # KV-cache storage
+│   └── toc_sections/               # TOC-based section extraction
+└── README.md                       # This file
 ```
 
 ## Configuration
@@ -284,7 +613,7 @@ By default, CagVault uses **Qwen3-14B locally via Ollama**. To change models, ed
 
 ```python
 class Config:
-    MODEL = QWEN_3  # Change to LLAMA_3_3 or add your own
+    MODEL = DEEPSEEK_V3  # Change to any model constant
     OLLAMA_CONTEXT_WINDOW = 8192  # Adjust context size
 ```
 
@@ -295,31 +624,41 @@ Currently, CagVault supports:
 - **Ollama** (default): Local inference, completely private, no API key needed
 - **Groq** (optional): Cloud inference, requires `GROQ_API_KEY` environment variable
 
-### Available Models
+### Model Comparison for RAG
 
-**Local Models (via Ollama):**
-- `hf.co/unsloth/Qwen3-14B-GGUF:Q4_K_XL` (default) - Qwen3 14B, 8K context
-- `llama2:latest` - Llama 2 7B
-- `mistral:latest` - Mistral 7B
-- See [ollama.com/library](https://ollama.com/library) for more
+| Model | Size | RAM Required | Context Window | Best For | Speed |
+|-------|------|--------------|----------------|----------|-------|
+| **DeepSeek V3** | 685B | 64GB+ | 64K | Best overall quality, complex reasoning | Slow |
+| **DeepSeek R1** | ~70B | 32GB+ | 32K | Advanced reasoning, credit analysis | Medium |
+| **Command R+** | ~104B | 32GB+ | 128K | RAG-optimized, long documents | Medium |
+| **Mistral Large** | ~123B | 32GB+ | 128K | Long-context tasks | Medium |
+| **Llama 3.3 70B** | 70B | 32GB+ | 128K | Strong reasoning, instruction following | Medium |
+| **Gemma 2 27B** | 27B | 16GB+ | 8K | Balanced reasoning | Fast |
+| **Qwen3-14B** ⭐ | 14B | 16GB | 8K | Default, excellent balance | Fast |
+| **Phi-4** | 14B | 16GB | 16K | Efficient, Microsoft-optimized | Fast |
+| **Llama 3.1 8B** | 8B | 8GB | 128K | Lightweight, fast responses | Very Fast |
+| **Mistral Small** | 7B | 8GB | 32K | Simple queries, minimal resources | Very Fast |
 
-**Cloud Models (via Groq):**
-- `meta-llama/llama-3.1-8b-instant`
-- `mixtral-8x7b-32768`
+⭐ = Default model
 
-To use a different local model, pull it first:
-```bash
-ollama pull <model-name>
-```
+### Adding Custom Models
 
-Then update `config.py`:
+To add a new model not in the config:
+
 ```python
-QWEN_3 = ModelConfig(
-    "<model-name>",
+# In config.py, add your model
+MY_CUSTOM_MODEL = ModelConfig(
+    "model-name-from-ollama",
     temperature=0.0,
     provider=ModelProvider.OLLAMA
 )
+
+# Then set it as default
+class Config:
+    MODEL = MY_CUSTOM_MODEL
 ```
+
+For a full list of available models, visit [ollama.com/library](https://ollama.com/library)
 
 ## Troubleshooting
 
@@ -367,20 +706,114 @@ If the model runs out of memory during inference:
 
 - Use a smaller model (e.g., `llama2:latest` instead of `qwen3:14b`)
 - Reduce `OLLAMA_CONTEXT_WINDOW` in `config.py`
+- **Reduce `OLLAMA_NUM_PARALLEL`** in `config.py` (try 2 instead of 4)
 - Close other applications
 - Increase system swap space
+
+### Slow or Hanging Requests
+
+If requests are timing out or hanging:
+
+**Check concurrent load**:
+```bash
+# Monitor Ollama connections
+lsof -i :11434 | wc -l  # Count active connections
+```
+
+**Solutions**:
+- Increase `REQUEST_TIMEOUT` in `config.py` for complex queries
+- Reduce `OLLAMA_NUM_PARALLEL` if system is overloaded
+- Check Ollama logs: `ollama logs` or check system console
+- Restart Ollama: `brew services restart ollama`
+
+**Optimal settings by RAM**:
+- 8-16GB RAM: `OLLAMA_NUM_PARALLEL = 2`
+- 16-32GB RAM: `OLLAMA_NUM_PARALLEL = 4` (default)
+- 32GB+ RAM: `OLLAMA_NUM_PARALLEL = 6-8`
+
+See [CONCURRENT_REQUESTS.md](CONCURRENT_REQUESTS.md) for detailed tuning guide.
+
+### Redis Connection Issues
+
+**Error**: Cannot connect to Redis or "Redis unavailable" warnings
+
+**Solution**: 
+```bash
+# Check if Redis is running
+redis-cli ping
+
+# If not running, start it
+brew services start redis  # macOS
+# or
+redis-server &  # Linux
+
+# Check Redis URL
+echo $REDIS_URL  # Should be redis://localhost:6379/0 or similar
+```
+
+**Fallback**: The app will work without Redis but with limited caching:
+- No Q&A cache
+- No question library
+- No persistent document sections
+- KV-Cache will use memory-only mode
 
 ### KV-Cache Issues
 
 If cache seems corrupted or causes issues:
 
 ```bash
-# Clear the cache
+# Clear the KV cache
 rm -rf .cache/kvcache/
 
 # Or clear via the UI
 # Click "🧹 Clear Cache" in the sidebar
 ```
+
+### Q&A Cache Issues
+
+If cached answers seem outdated or incorrect:
+
+```bash
+# Clear Redis Q&A cache via UI:
+# 1. Expand "💾 Q&A Cache Management" in sidebar
+# 2. Click "🗑️ Clear All Q&A Cache"
+
+# Or clear via Redis CLI:
+redis-cli
+> KEYS qa_cache:*
+> DEL qa_cache:*
+> KEYS doc_questions:*
+> DEL doc_questions:*
+```
+
+### Duplicate Sections / Looping
+
+If you see repeated sections in the UI or logs:
+
+**Cause**: Document loaded multiple times without clearing memory
+
+**Solution**: This should be automatically prevented by the deduplication guards. If it still occurs:
+```bash
+# Restart the app (clears in-memory state)
+pkill -f streamlit
+streamlit run app.py
+
+# Or clear Redis document cache
+redis-cli
+> KEYS doc:*
+> DEL doc:*
+```
+
+### Section References Not Appearing
+
+If cited sections don't auto-expand in chat:
+
+**Check**:
+1. LLM is citing sections by number (e.g., "Section 5.12.2") or title
+2. Document has been parsed with enhanced parser (not URL-only)
+3. Section titles match citation format
+
+**Debug**: Check the logs for "Referenced sections" or "No section titles detected"
 
 ## Performance Considerations
 
@@ -414,44 +847,379 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 5. **Efficient Queries**: User questions are processed using the cached context
 6. **Streaming Response**: The model generates answers using preloaded knowledge
 
-### Architecture
+### Current Architecture (December 2025)
 
 ```
-User Documents
-    ↓
-Docling (Format Conversion)
-    ↓
-KV-Cache Manager (Precompute & Store)
-    ↓
-Ollama (Local LLM Inference)
-    ↓
-Streamlit UI (Chat Interface)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           CAGVAULT ARCHITECTURE                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DOCUMENT INGESTION PIPELINE                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  User Documents (PDF/TXT/MD/URL)                                           │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌───────────────────┐                                                     │
+│  │  Docling Parser   │  ← Converts PDFs with layout preservation          │
+│  │  (skills/pdf_*)   │  ← OCR support (optional)                          │
+│  └────────┬──────────┘  ← Table detection                                 │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌───────────────────────────────────────────────┐                        │
+│  │  Enhanced Parser (LLM-Powered Analysis)       │                        │
+│  │                                                │                        │
+│  │  • Hierarchical section extraction             │                        │
+│  │  • Parallel LLM importance scoring (4 workers) │                        │
+│  │  • Credit analyst classification               │                        │
+│  │  • Page-accurate tracking (word-based)         │                        │
+│  │  • Named Entity Recognition (NER)              │                        │
+│  │  • Cross-reference detection                   │                        │
+│  └────────┬──────────────────────────────────────┘                        │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌───────────────────────────────────────────────┐                        │
+│  │  SectionMemoryStore (In-Memory)               │                        │
+│  │                                                │                        │
+│  │  • Hierarchical document structure             │                        │
+│  │  • Section → Subsection relationships          │                        │
+│  │  • Metadata indexing (pages, importance, type) │                        │
+│  │  • Deduplication prevention                    │                        │
+│  └────────┬──────────────────────────────────────┘                        │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌───────────────────────────────────────────────┐                        │
+│  │  Redis Persistence (Optional)                 │                        │
+│  │                                                │                        │
+│  │  doc:{doc_id}:meta         → Document metadata │                        │
+│  │  doc:{doc_id}:sections     → Section IDs list  │                        │
+│  │  doc:{doc_id}:section:{id} → Full section data │                        │
+│  │  doc:{doc_id}:keywords     → Search index      │                        │
+│  │  doc:{doc_id}:entities     → NER results       │                        │
+│  └────────────────────────────────────────────────┘                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SEARCH & RETRIEVAL LAYER                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────┐  ┌───────────────────┐  ┌────────────────────┐    │
+│  │ Keyword Search   │  │ Semantic Search   │  │ Agentic Search     │    │
+│  │ (FullTextSearch) │  │ (Embedding-based) │  │ (Claude-powered)   │    │
+│  └────────┬─────────┘  └────────┬──────────┘  └─────────┬──────────┘    │
+│           │                     │                        │                │
+│           └─────────────────────┴────────────────────────┘                │
+│                                 │                                          │
+│                                 ▼                                          │
+│                    ┌────────────────────────┐                             │
+│                    │  Search Results        │                             │
+│                    │  + Relevance Scores    │                             │
+│                    │  + Reasoning (Agentic) │                             │
+│                    └────────────────────────┘                             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CHAT & Q&A LAYER                                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  User Question                                                              │
+│      │                                                                      │
+│      ▼                                                                      │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Question Library (Redis)               │                              │
+│  │                                          │                              │
+│  │  • 15+ categories (Definitions, etc.)   │                              │
+│  │  • Usage tracking & popularity          │                              │
+│  │  • Autocomplete suggestions             │                              │
+│  │  • Per-document & global questions      │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Q&A Cache (Redis, 24h TTL)             │                              │
+│  │                                          │                              │
+│  │  Key: sha256(question + doc_ids)        │                              │
+│  │  Value: {response, thinking, metadata}  │                              │
+│  │                                          │                              │
+│  │  Cache Hit? → Return cached response ✓  │                              │
+│  │  Cache Miss? → Continue to LLM ↓        │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Context Builder                        │                              │
+│  │                                          │                              │
+│  │  • Load full document content           │                              │
+│  │  • Build hierarchical context           │                              │
+│  │  • Include section metadata             │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  KV-Cache Manager                       │                              │
+│  │                                          │                              │
+│  │  • Precompute context state             │                              │
+│  │  • Track token counts                   │                              │
+│  │  • Deduplicate sources                  │                              │
+│  │  • Persistent disk storage              │                              │
+│  │                                          │                              │
+│  │  10-40x speedup for multi-turn chat!    │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Ollama LLM Server (4 Parallel Workers)│                              │
+│  │                                          │                              │
+│  │  Model: Qwen3-14B (Q4_K_XL quantized)   │                              │
+│  │  Context: 8K+ tokens                    │                              │
+│  │  Temperature: 0.0 (deterministic)       │                              │
+│  │                                          │                              │
+│  │  ┌────────────────────────────┐         │                              │
+│  │  │ System Prompt              │         │                              │
+│  │  │ • Credit analyst expertise │         │                              │
+│  │  │ • Cross-reference checking │         │                              │
+│  │  │ • Citation requirements    │         │                              │
+│  │  └────────────────────────────┘         │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Response Stream                        │                              │
+│  │                                          │                              │
+│  │  <think>...</think> → Reasoning         │                              │
+│  │  Answer → Final response                │                              │
+│  │                                          │                              │
+│  │  • Auto-cache to Redis                  │                              │
+│  │  • Extract section references           │                              │
+│  │  • Track to question library            │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  ┌─────────────────────────────────────────┐                              │
+│  │  Referenced Section Matcher             │                              │
+│  │                                          │                              │
+│  │  • Regex-based title matching           │                              │
+│  │  • Numeric prefix detection (5.12.2)    │                              │
+│  │  • Section/§ prefix variants            │                              │
+│  │  • Case-insensitive matching            │                              │
+│  │  • Subsection inclusion                 │                              │
+│  └────────┬────────────────────────────────┘                              │
+│           │                                                                 │
+│           ▼                                                                 │
+│  Streamlit UI Display:                                                     │
+│  • Chat messages                                                           │
+│  • Expandable thinking blocks                                              │
+│  • Referenced section expanders with full content                          │
+│  • Cache status indicators                                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DATA FLOW SUMMARY                                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. UPLOAD: PDF → Docling → Enhanced Parser → Section Analysis (parallel)  │
+│  2. STORE:  Sections → Memory + Redis persistence                          │
+│  3. INDEX:  Keywords + Entities + Semantic embeddings                      │
+│  4. QUERY:  Question → Library + Q&A Cache check                           │
+│  5. SEARCH: Keyword/Semantic/Agentic → Relevant sections                   │
+│  6. BUILD:  Context from sections → KV-Cache                               │
+│  7. INFER:  LLM with cached context → Streamed response                    │
+│  8. MATCH:  Extract section refs → Auto-expand in UI                       │
+│  9. CACHE:  Store Q&A + Update library + Track usage                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Components
 
-- **kvcache.py**: Manages KV-state caching with in-memory and disk storage
-- **Docling**: Converts PDF/HTML/TXT/MD → plain text with layout preservation
-- **LangChain**: Orchestrates LLM interactions and streaming
-- **Ollama**: Local inference server with automatic KV caching
-- **Streamlit**: Renders the chat UI with real-time updates
+#### Core Infrastructure
+- **Ollama**: Local LLM inference server (Qwen3-14B)
+- **Redis**: Optional persistence for caches and sections
+- **Streamlit**: Interactive web UI with real-time updates
+- **LangChain**: LLM orchestration and streaming
+
+#### Document Processing
+- **Docling** (`skills/pdf_parser/pdf_parser.py`): PDF/HTML/TXT/MD conversion with layout preservation
+- **EnhancedPDFParserSkill** (`skills/pdf_parser/enhanced_parser.py`): 
+  - LLM-powered section extraction
+  - Parallel importance scoring (ThreadPoolExecutor)
+  - Hierarchical structure with page tracking
+  - Redis persistence with deduplication guards
+- **SectionMemoryStore**: In-memory hierarchical document structure
+- **NamedEntityRecognizer** (`skills/pdf_parser/ner_search.py`): Extract and index entities
+
+#### Search & Retrieval
+- **FullTextSearchEngine**: Fast keyword search with tokenization
+- **Semantic Search**: Embedding-based similarity matching
+- **Agentic Search**: Claude-powered intelligent query understanding
+
+#### Caching System
+- **KVCacheManager** (`kvcache.py`): Context state caching with disk persistence
+- **QACacheManager** (`qa_cache.py`): Redis-backed Q&A caching with TTL
+- **QuestionLibraryManager** (`question_library.py`): Question tracking with categorization
+
+#### Credit Analysis
+- **CreditAnalystPrompt** (`skills/pdf_parser/credit_analyst_prompt.py`): Section classification and importance
+- **LLMSectionEvaluator** (`skills/pdf_parser/llm_section_evaluator.py`): Batch analysis with parallel processing
 
 ### Performance Optimizations
 
-The KV-Cache implementation provides:
+#### Multi-Layer Caching Strategy
 
+**1. KV-Cache (Context State)**
 - **No document reprocessing**: Once cached, documents aren't re-tokenized
-- **Multi-turn speedup**: 10-40x faster for subsequent queries (from paper)
+- **Multi-turn speedup**: 10-40x faster for subsequent queries (from CAG paper)
 - **Memory efficient**: Tracks token counts and cache size
 - **Automatic deduplication**: Same documents aren't cached twice
-- **Persistent storage**: Caches are stored on disk for reuse across sessions
+- **Persistent storage**: Caches stored on disk for reuse across sessions
+
+**2. Q&A Cache (Response Level)**
+- **Instant retrieval**: Identical questions return cached answers immediately
+- **Document-aware**: Cache keys include document IDs for precise matching
+- **24-hour TTL**: Auto-expires to keep answers fresh
+- **Thinking included**: Caches both reasoning and final response
+- **Per-document management**: Clear cache for specific documents
+
+**3. Document Section Cache (Redis)**
+- **Parse once**: Parsed sections persisted to Redis
+- **Fast reload**: Load document structure without re-parsing
+- **Hierarchical storage**: Maintains parent-child relationships
+- **Search index**: Pre-computed keywords and entities
+- **Deduplication guards**: Prevents repeated section additions
+
+#### Parallel Processing & Concurrent Requests
+
+**Concurrent Request Handling**
+- **4 parallel LLM workers** handle simultaneous requests
+- Non-blocking chat responses during document processing
+- Multiple users can interact concurrently
+- Configurable via `Config.OLLAMA_NUM_PARALLEL`
+- 5-minute request timeout prevents hanging operations
+- See [CONCURRENT_REQUESTS.md](CONCURRENT_REQUESTS.md) for detailed configuration
+
+**Section Analysis (4 workers)**
+- Concurrent LLM calls for importance scoring
+- Classification of section types (COVENANT, DEFAULT, etc.)
+- Batch processing of subsections
+- Progress logging every 10 sections
+
+**Word-Based Page Estimation**
+- ~250 words per page heuristic
+- Instant calculation vs. slow LLM page range calls
+- Accurate enough for UI display and citations
+
+#### Memory Management
+
+**In-Memory Section Store**
+- Fast lookups by section ID
+- Hierarchical traversal for subsections
+- Automatic memory clearing before fresh loads
+- Prevents duplicate section accumulation
+
+## Best Practices
+
+### For Credit Agreement Analysis
+
+1. **Upload Full Agreement**: Include all sections, schedules, and amendments
+2. **Let Parsing Complete**: Wait for parallel LLM analysis to finish (progress shown)
+3. **Use Agentic Search**: For complex queries, agentic search provides reasoning
+4. **Check Referenced Sections**: Always expand cited sections to verify context
+5. **Review Cache**: Use Q&A cache management to track analysis history
+
+### For Optimal Performance
+
+1. **Enable Redis**: Install and run Redis for best caching performance
+2. **Batch Upload**: Upload all related documents before starting Q&A
+3. **Use Suggested Questions**: Build question library for faster team collaboration
+4. **Monitor Cache Stats**: Clear old caches periodically to free memory
+5. **Parallel Processing**: Parser uses 4 workers by default; increase for faster analysis
+
+### For Question Library
+
+1. **Categorize Thoughtfully**: Questions are auto-categorized but review for accuracy
+2. **Track Usage**: Popular questions surface to the top automatically
+3. **Search Before Asking**: Use autocomplete to find existing answers
+4. **Document-Specific**: Filter questions by document for focused analysis
+5. **Clear Periodically**: Remove outdated questions to keep library relevant
+
+### For Multi-Document Context
+
+1. **Related Documents**: Upload contracts and amendments together
+2. **Clear Context Cache**: When switching document sets, clear cache
+3. **Check Message Source IDs**: Verify which documents are in context
+4. **Redis Loading**: For frequently used documents, load from Redis cache
 
 ## Limitations
 
-- **Context Window**: Currently limited to ~8k tokens (Qwen3) or ~128k tokens (Llama 3.1)
-- **Document Size**: Works best with constrained knowledge bases that fit in context
-- **Memory Usage**: Large models require significant RAM (8GB+ for 7B models, 16GB+ for 14B models)
-- **Not for Unbounded Knowledge**: For very large or constantly updating knowledge bases, traditional RAG may be more appropriate
+### Context Window Constraints
+- **Qwen3-14B**: ~8K tokens (~3-4 medium PDFs or 1 large credit agreement)
+- **Token Estimation**: ~750 tokens per page for dense legal documents
+- **Workaround**: Focus on specific sections or use search to find relevant parts
+
+### Memory Requirements
+- **Minimum**: 8GB RAM for 7B models
+- **Recommended**: 16GB RAM for 14B models
+- **With Redis**: Additional ~100MB-1GB depending on document count
+- **Section Analysis**: Uses 4 parallel workers (can adjust in code)
+
+### Redis Dependency
+- **Optional**: App works without Redis but with limited features
+- **Q&A Cache**: Requires Redis for persistence
+- **Question Library**: Requires Redis for cross-session storage
+- **Document Sections**: Can use memory-only but won't persist
+
+### Not Ideal For
+- **Constantly Updating Knowledge**: Traditional RAG better for dynamic data
+- **Very Large Corpora**: 100+ documents may exceed context limits
+- **Real-Time Collaboration**: Single-user app, not designed for teams
+- **Production Deployments**: This is a research/analysis tool, not a production service
+
+## Recent Changes (December 2025)
+
+### Enhanced PDF Intelligence
+- ✅ **Parallel LLM Section Analysis**: 4 concurrent workers for faster parsing
+- ✅ **Credit Analyst Classification**: Automatic detection of COVENANTS, DEFAULTS, etc.
+- ✅ **Importance Scoring**: AI-driven relevance analysis (0-1 scale)
+- ✅ **Page-Accurate Tracking**: Word-based estimation for instant page mapping
+- ✅ **Hierarchical Sections**: Full parent-child relationships preserved
+
+### Search & Discovery
+- ✅ **Multi-Modal Search**: Keyword, semantic, and agentic (Claude-powered)
+- ✅ **Named Entity Recognition**: Extract PARTY, DATE, MONEY, AGREEMENT entities
+- ✅ **Entity Filtering**: Browse by entity type across all sections
+- ✅ **Section References**: Auto-expand cited sections in chat responses
+
+### Caching System
+- ✅ **Q&A Cache**: Redis-backed with 24-hour TTL
+- ✅ **Question Library**: 15+ categories with autocomplete
+- ✅ **Suggested Questions**: Popular queries by document or global
+- ✅ **Cache Analytics**: Real-time stats and management UI
+- ✅ **Deduplication Guards**: Prevent repeated section additions
+
+### UI/UX Improvements
+- ✅ **Document Tabs**: Sections, Search, Entities in organized tabs
+- ✅ **Cache Indicators**: Visual feedback for cache hits
+- ✅ **Referenced Section Expanders**: Click to view full cited sections
+- ✅ **Browse by Category**: Explore questions by type
+- ✅ **Redis Document Picker**: Load previously parsed documents
+
+### Performance
+- ✅ **Concurrent Request Handling**: 4 parallel LLM workers for simultaneous requests
+- ✅ **Memory Management**: Automatic clearing before fresh loads
+- ✅ **Parallel Processing**: ThreadPoolExecutor for section analysis
+- ✅ **Redis Persistence**: Store parsed sections for instant reload
+- ✅ **Word-Based Estimation**: Fast page calculation without LLM calls
+- ✅ **Connection Pooling**: Optimized Ollama connections with timeout management
+
+### Technical
+- ✅ **Python 3.14 Support**: Compatible with latest Python
+- ✅ **Redis Optional**: Falls back to memory-only if unavailable
+- ✅ **Enhanced Error Handling**: Better logging and fallbacks
+- ✅ **Document Deduplication**: Prevent duplicate button keys
 
 ## Citation
 
@@ -474,12 +1242,47 @@ MIT License - See LICENSE file for details
 
 Contributions welcome! Please open an issue or submit a pull request.
 
+## Author
+
+Created by [Amitabha Karmakar](https://www.linkedin.com/in/amitabha-karmakar/)
+
 ## Support
 
-For issues or questions:
-- Open a GitHub issue
-- Check the troubleshooting section
-- Review the CAG paper: https://arxiv.org/abs/2412.15605v1
+### Getting Help
+
+**For Issues or Questions:**
+1. Check the [Troubleshooting](#troubleshooting) section above
+2. Review the [Best Practices](#best-practices) for optimal usage
+3. Check logs in the terminal where you ran `streamlit run app.py`
+4. Open a GitHub issue with:
+   - Error message and full traceback
+   - Python version (`python --version`)
+   - Ollama status (`ollama list`)
+   - Redis status (`redis-cli ping`)
+   - Steps to reproduce
+
+**Documentation:**
+- CAG Paper: https://arxiv.org/abs/2412.15605v1
+- Implementation Details:
+  - `QA_CACHE_IMPLEMENTATION.md` - Q&A caching system
+  - `QUESTION_LIBRARY_IMPLEMENTATION.md` - Question library design
+  - `PDF_PARSER_SKILL_SUMMARY.md` - Enhanced PDF parsing
+  - `CLAUDE_SKILLS_GUIDE.md` - Claude skills integration
+
+**Logs & Debugging:**
+```bash
+# Check terminal output for detailed logs
+# Logs include:
+# - Section extraction progress
+# - LLM analysis status
+# - Cache hits/misses
+# - Redis connection status
+# - Entity extraction results
+
+# Enable more verbose logging (if needed):
+export LOG_LEVEL=DEBUG
+streamlit run app.py
+```
 
 ---
 
