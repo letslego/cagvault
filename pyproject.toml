@@ -1,5 +1,6 @@
 dependencies = [
     "docling>=2.31.0",
+    "aiohttp>=3.11.0",
     "langchain-core>=0.3.56",
     "langchain-groq>=0.3.2",
     "langchain-ollama>=0.3.2",

@@ -1,5 +1,7 @@
 import os
 import re
+import json
+import time
 import streamlit as st
 from config import Config, ModelConfig, ModelProvider
 from config import (
@@ -16,6 +18,7 @@ from question_library import get_question_library
 # Import Claude Skills PDF parser
 from skills.pdf_parser.enhanced_parser import get_enhanced_parser
 from skills.pdf_parser.ner_search import get_searchable_parser
+from skills.mcp.claude_mcp_server import get_claude_mcp_server
 
 st.set_page_config(
     page_title="CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
@@ -58,6 +61,12 @@ def init_pdf_parser():
 def init_search_parser():
     """Initialize searchable parser."""
     return get_searchable_parser()
+
+
+@st.cache_resource(show_spinner=False)
+def init_mcp_server():
+    """Initialize Claude MCP server for async tools."""
+    return get_claude_mcp_server()
 
 def load_sections_from_redis(doc_id: str):
     """Load sections for a document from Redis into parser memory."""
@@ -156,6 +165,8 @@ if "message_source_ids" not in st.session_state:
     st.session_state.message_source_ids = set()
 if "parsed_documents" not in st.session_state:
     st.session_state.parsed_documents = {}  # Store parsed PDF metadata
+if "mcp_tasks" not in st.session_state:
+    st.session_state.mcp_tasks = {}
     
 with st.sidebar:
     st.title("CAG Vault")
@@ -199,6 +210,103 @@ with st.sidebar:
         st.markdown("**Download Models:**")
         st.code("./download_models.sh", language="bash")
         st.caption("Run this script to download all supported models")
+
+    # Claude MCP async tools
+    with st.expander("🔌 Claude MCP Tools", expanded=False):
+        mcp_server = init_mcp_server()
+        action = st.selectbox(
+            "Pick a tool",
+            options=["Web search", "Web search + API call"],
+            key="mcp_action",
+        )
+        query = st.text_area("Query", placeholder="What do you want to research?", key="mcp_query")
+        max_results = st.slider("Max results", min_value=3, max_value=15, value=5, step=1, key="mcp_max_results")
+
+        followup_api = None
+        payload_obj = None
+        api_url = ""
+        api_method = "POST"
+        api_payload_text = ""
+
+        if action == "Web search + API call":
+            api_url = st.text_input("API URL", placeholder="https://example.com/hook", key="mcp_api_url")
+            api_method = st.selectbox("HTTP method", ["POST", "GET"], key="mcp_api_method")
+            api_payload_text = st.text_area("API payload (JSON)", placeholder='{"query": "..."}', key="mcp_api_payload")
+            if api_payload_text:
+                try:
+                    payload_obj = json.loads(api_payload_text)
+                except json.JSONDecodeError:
+                    st.error("Payload must be valid JSON")
+            followup_api = {"url": api_url.strip(), "payload": payload_obj, "method": api_method}
+
+        if st.button("Run Claude MCP task", key="run_mcp_task"):
+            if not query.strip():
+                st.warning("Please enter a query")
+            elif action == "Web search + API call" and not api_url.strip():
+                st.warning("API URL required for follow-up call")
+            elif action == "Web search + API call" and api_payload_text and payload_obj is None:
+                st.warning("Fix JSON payload before running")
+            else:
+                task_id = mcp_server.start_web_search(query.strip(), max_results, followup_api if action == "Web search + API call" else None)
+                st.session_state.mcp_tasks[task_id] = {"mode": action, "query": query.strip()}
+                st.success(f"Started task {task_id[:8]}")
+                st.rerun()
+
+        if st.session_state.mcp_tasks:
+            col1, col2 = st.columns([0.7, 0.3])
+            with col1:
+                st.markdown("**Task status**")
+            with col2:
+                if st.button("🔄 Check Status", key="refresh_tasks"):
+                    st.rerun()
+            to_remove = []
+            for task_id, meta in list(st.session_state.mcp_tasks.items()):
+                task = mcp_server.get_task(task_id)
+                if not task:
+                    continue
+                status = task.status
+                elapsed = time.time() - task.started_at
+                st.caption(f"🔍 {meta['query'][:50]}...")
+                if status in {"pending", "running"}:
+                    st.info(f"⏳ Running... ({elapsed:.1f}s)")
+                elif status == "done":
+                    st.success(f"✅ Complete ({task.completed_at - task.started_at:.1f}s)")
+                    with st.expander(f"Results", expanded=True):
+                        if task.result:
+                            res = task.result.get("search_results", {})
+                            count = res.get('count', 0)
+                            
+                            if count > 0:
+                                st.write(f"**Found {count} results**")
+                                for item in res.get("items", [])[:5]:
+                                    st.markdown(f"**[{item.get('title', 'No title')}]({item.get('url', '#')})**")
+                                    st.caption(item.get('snippet', ''))
+                                    st.markdown("---")
+                            else:
+                                st.info("DuckDuckGo returned no related topics. Showing abstract if available:")
+                                raw = res.get("raw_data", {})
+                                if raw.get("Abstract"):
+                                    st.markdown(f"**{raw.get('Heading', 'Info')}**")
+                                    st.write(raw.get("Abstract"))
+                                    if raw.get("AbstractURL"):
+                                        st.markdown(f"[Read more]({raw.get('AbstractURL')})")
+                                else:
+                                    st.warning("No results found. Try a different query or more specific terms.")
+                            
+                            if task.result.get("followup_api"):
+                                st.markdown("**API Response:**")
+                                st.json(task.result["followup_api"])
+                    if st.button("✕ Dismiss", key=f"dismiss_{task_id}"):
+                        to_remove.append(task_id)
+                elif status == "error":
+                    st.error(f"❌ {task.error or 'Task failed'}")
+                    if st.button("✕ Dismiss", key=f"dismiss_{task_id}"):
+                        to_remove.append(task_id)
+                st.markdown("---")
+            for task_id in to_remove:
+                st.session_state.mcp_tasks.pop(task_id, None)
+            if to_remove:
+                st.rerun()
     
     st.markdown("---")
     
