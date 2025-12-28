@@ -226,10 +226,17 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 
 **Key Flows:**
 - **Upload/Parse → LanceDB**: PDFs run through Docling + LLM section analysis, saved to `doc_sections` with entities and TOC metadata.
-- **Ask → Router → Cache**: Questions first check LanceDB Q&A cache/question library before invoking the LLM.
+- **Ask → Router → Cache** (default mode): Questions first check LanceDB Q&A cache/question library before invoking the LLM.
 - **Retrieval/Tools**: When needed, the agent retrieves sections from LanceDB or calls MCP tools (web, entity, ranking, cross-doc, verification, follow-ups).
 - **Answering**: Responses stream with reasoning trace, cited sections, and the skills/tools used for transparency.
 - **Persistence**: All storage is local (LanceDB + optional caches); no cloud services are required.
+
+**Execution Modes:**
+- **Default (LanceDB Chat)**: Uses LanceDB retrieval plus Q&A cache and question library for fast local answers. No MCP tools or multi-step agent planning are invoked.
+- **Agentic RAG Mode (toggle in UI)**: Adds planning, strategy selection, and MCP tools (web search, entities, ranking, cross-doc, fact check, follow-ups). This path currently bypasses the LanceDB Q&A cache for answers.
+
+**Knowledge Base Skills:**
+- Skills live locally in `knowledge-base/` and are inferred by lightweight keyword heuristics. They are rendered with each answer for transparency and kept private on-disk (see `.gitignore`).
 
 ## Core Features
 
