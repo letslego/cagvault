@@ -206,13 +206,14 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 │                           Agent Brain                              │
 │  Router: question classifier + skill inference                     │
 │  Planner: chooses cached answer, retrieval, or tool use            │
-│  Reasoner: Claude/Ollama models with KV-cache + reflection         │
+│  Reasoner: Claude/Ollama models with reflection                    │
 │  Tools (Claude Agent SDK via MCP):                                 │
 │    • web_search • entity_extractor • section_ranker                │
 │    • cross_doc_links • fact_verifier • followup_suggester          │
 │  Skills: PDF parser, TOC/NER search, credit analyst prompts,       │
 │          knowledge-base skill registry                             │
-│  Caches: Q&A cache, question library, KV-cache, DataFrame cache    │
+│  Caches: Q&A cache (LanceDB), question library (LanceDB),          │
+│          in-memory DataFrame cache                                 │
 └───────────────┬────────────────────────────────────────────────────┘
                 │ retrieval + storage calls
 ┌───────────────▼────────────────────────────────────────────────────┐
@@ -225,7 +226,7 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 
 **Key Flows:**
 - **Upload/Parse → LanceDB**: PDFs run through Docling + LLM section analysis, saved to `doc_sections` with entities and TOC metadata.
-- **Ask → Router → Cache**: Questions first check KV-cache/Q&A cache/question library before invoking the LLM.
+- **Ask → Router → Cache**: Questions first check LanceDB Q&A cache/question library before invoking the LLM.
 - **Retrieval/Tools**: When needed, the agent retrieves sections from LanceDB or calls MCP tools (web, entity, ranking, cross-doc, verification, follow-ups).
 - **Answering**: Responses stream with reasoning trace, cited sections, and the skills/tools used for transparency.
 - **Persistence**: All storage is local (LanceDB + optional caches); no cloud services are required.
