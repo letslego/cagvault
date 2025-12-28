@@ -19,6 +19,7 @@ from lancedb_cache import get_lancedb_store
 from agentic_rag import create_agentic_rag, AgenticRAG
 from agent_sdk_tools import create_cag_mcp_server, CAG_TOOL_NAMES
 from voice_features import get_voice_processor, VoiceConfig, is_voice_available
+from data_lineage import get_lineage_tracker
 
 # Import Claude Skills PDF parser
 from skills.pdf_parser.enhanced_parser import get_enhanced_parser, Section, SectionMetadata
@@ -144,8 +145,15 @@ def render_skill_list(skills: list, label: str = "Skills used", expanded: bool =
 st.set_page_config(
     page_title="CAG", layout="centered", initial_sidebar_state="expanded", page_icon="🌵"
 )
- 
-st.header("🌵 CAG Agentic Chat")
+
+# Navigation
+col1, col2 = st.columns([0.85, 0.15])
+with col1:
+    st.header("🌵 CAG Agentic Chat")
+with col2:
+    if st.button("📊 Lineage", help="View data pipeline lineage and metrics"):
+        st.switch_page("pages/lineage_dashboard.py")
+
 st.subheader("Completely local and private chat with your documents")
 
 # Model configurations with metadata
@@ -1217,7 +1225,14 @@ with st.sidebar:
             tmp.write(uploaded_file.getvalue())
             tmp_path = tmp.name
         
+        # Track document ingestion
+        lineage = get_lineage_tracker()
+        start_time = time.time()
+        
         try:
+            # Track PDF ingestion
+            doc_id = lineage.track_pdf_ingestion(uploaded_file.name, uploaded_file.size)
+            
             # Load file into knowledge base
             source = load_from_file(uploaded_file.name, uploaded_file.read())
             st.session_state.sources[source.id] = source
@@ -1229,13 +1244,26 @@ with st.sidebar:
             
             with st.spinner("📄 Converting PDF to text..."):
                 # Extract sections
+                extraction_start = time.time()
                 extraction_result = pdf_parser.parse_and_extract_sections(tmp_path)
+                extraction_duration = (time.time() - extraction_start) * 1000
+                
+                # Track section extraction
+                sections = extraction_result.get('sections', [])
+                for i, section in enumerate(sections[:10]):  # Track first 10 sections
+                    section_text = section.get('text', '') if isinstance(section, dict) else str(section)
+                    lineage.track_section_extraction(
+                        doc_id, 
+                        f"section_{i}_{section.get('title', f'Section {i}')[:20]}" if isinstance(section, dict) else f"section_{i}",
+                        section_text,
+                        extraction_duration / len(sections) if sections else extraction_duration
+                    )
                 
                 # Store parsed metadata
-                doc_id = extraction_result.get('document_id')
+                doc_id_parsed = extraction_result.get('document_id')
                 st.session_state.parsed_documents[source.id] = {
                     'document_name': uploaded_file.name,
-                    'document_id': doc_id,
+                    'document_id': doc_id_parsed,
                     'sections_count': extraction_result.get('sections_count', 0),
                     'extraction_result': extraction_result
                 }
@@ -1243,11 +1271,11 @@ with st.sidebar:
                 # Queue for LanceDB chat ingestion, deduped by document id
                 file_type = uploaded_file.name.split(".")[-1].lower()
                 file_size = uploaded_file.size
-                already_queued = any(doc.get("document_id") == doc_id for doc in st.session_state.lancedb_documents)
+                already_queued = any(doc.get("document_id") == doc_id_parsed for doc in st.session_state.lancedb_documents)
                 if not already_queued:
                     st.session_state.lancedb_documents.append({
                         "name": uploaded_file.name,
-                        "document_id": doc_id,
+                        "document_id": doc_id_parsed,
                         "content": source.content,
                         "file_type": file_type,
                         "file_size": file_size,
@@ -1256,9 +1284,16 @@ with st.sidebar:
                     })
                     # Immediately index into LanceDB vector store
                     try:
+                        embed_start = time.time()
                         lancedb_chat = init_lancedb_chat()
                         with st.spinner("Indexing document into LanceDB..."):
                             lancedb_chat.add_documents(st.session_state.lancedb_documents[-1:])
+                        embed_duration = (time.time() - embed_start) * 1000
+                        
+                        # Track LanceDB storage
+                        embedding_ids = [f"embedding_{i}" for i in range(extraction_result.get('sections_count', 0))]
+                        lineage.track_lancedb_storage(embedding_ids, f"doc_{doc_id_parsed}", embed_duration)
+                        
                         st.session_state.lancedb_indexed = True
                     except Exception as e:
                         st.session_state.lancedb_indexed = False
@@ -1801,6 +1836,25 @@ elif st.session_state.sources:
                         advanced_search=advanced_search_config,
                     )
                     full_response_content = response.answer
+                    
+                    # Track retrieval in lineage
+                    retrieve_end = time.time()
+                    if response.source_nodes:
+                        lineage.track_retrieval(
+                            query=query,
+                            retrieved_sections=list(response.source_nodes)[:5],  # Top 5 sources
+                            duration_ms=(retrieve_end - start_time) * 1000,
+                            cache_hit=getattr(response, 'from_cache', False)
+                        )
+                        query_id = f"query_{retrieve_end}"
+                    
+                    # Track LLM response
+                    lineage.track_llm_response(
+                        query_id=query_id if response.source_nodes else "",
+                        response=full_response_content,
+                        duration_ms=100,  # LanceDB response time typically < 100ms
+                        model=current_model_config.model_name
+                    )
                     
                     # Display response
                     message_placeholder.markdown(full_response_content)

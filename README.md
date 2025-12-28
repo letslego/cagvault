@@ -294,6 +294,31 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 - **Memory Management**: In-memory section store with LanceDB persistence
 - **Connection Pooling**: Optimized Ollama connections with timeout management
 
+## 📊 Data Lineage Tracking (New!)
+
+The system now includes **OpenLineage-compliant data lineage tracking** to monitor your document processing pipeline:
+
+**View the [Data Lineage Dashboard](pages/lineage_dashboard.py)** to:
+- 📈 Monitor end-to-end data flow from document ingestion → embedding → retrieval → LLM response
+- 📊 Track 6 operation types: ingest, extract_section, embed, store_lancedb, retrieve, llm_response
+- ⏱️ Analyze performance metrics: operation durations, success rates, slowest operations
+- 🔍 Explore data assets: PDF files, sections, embeddings, queries, answers
+- 📋 View complete lineage: trace where any data came from and where it went
+
+**Dashboard Views:**
+1. **Overview**: Total events, assets, success rate, operation breakdown
+2. **Events Timeline**: Chronological event log with filtering and visualization
+3. **Asset Lineage**: Trace complete data flow for any document or section
+4. **Performance Analysis**: Duration distribution, trends, and statistics
+
+**Integration:**
+- Automatically tracks all document uploads and processing
+- Adds minimal overhead (~5-10ms per operation)
+- Data stored locally in `.cache/lineage.db` (SQLite)
+- No external services or cloud dependencies
+
+See [DATA_LINEAGE_GUIDE.md](DATA_LINEAGE_GUIDE.md) for detailed API documentation.
+
 ## Prerequisites
 
 ### Required
