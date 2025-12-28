@@ -535,24 +535,45 @@ print("Migration complete! Redis data imported to LanceDB.")
 
 ### 7. (Optional) Enable Voice Features
 
-Voice features allow speech-to-text input and text-to-speech output. Install optional dependencies:
+Voice features allow speech-to-text input and text-to-speech output.
+
+#### Option A: Fully Open Source (Recommended)
+
+Use local Whisper models - no API keys needed, 100% offline:
+
+```bash
+# Fast, optimized local Whisper (recommended)
+pip install pyttsx3 sounddevice soundfile faster-whisper
+
+# OR standard local Whisper
+pip install pyttsx3 sounddevice soundfile openai-whisper
+```
+
+**Advantages:**
+- ✅ Completely free and open source
+- ✅ Works offline (no internet required)
+- ✅ No API keys or usage limits
+- ✅ Privacy-focused (data stays local)
+
+**Model sizes** (faster-whisper or openai-whisper):
+- `tiny` - Fastest, least accurate (~75MB)
+- `base` - Good balance (default, ~145MB)
+- `small` - Better accuracy (~466MB)
+- `medium` - High accuracy (~1.5GB)
+- `large` - Best accuracy (~3GB)
+
+#### Option B: OpenAI Whisper API (Cloud)
+
+If you prefer cloud-based STT with API:
 
 ```bash
 pip install pyttsx3 sounddevice soundfile openai
-```
 
-**Requirements:**
-- `pyttsx3`: Local text-to-speech synthesis (no API key needed)
-- `sounddevice` + `soundfile`: Audio recording from microphone
-- `openai`: Access to Whisper API for speech-to-text (requires `OPENAI_API_KEY` environment variable)
-
-**Set up OpenAI API key (optional, for Whisper STT):**
-
-```bash
+# Set API key
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
-If you don't have an OpenAI API key, TTS will still work locally, and STT will be disabled.
+**Note:** Both options use `pyttsx3` for TTS (already open source and local).
 
 ### 8. Verify Installation
 

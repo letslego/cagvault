@@ -2,7 +2,7 @@
 Voice Features for CAG RAG System
 
 Provides:
-- Speech-to-text (STT) for voice input using OpenAI's Whisper
+- Speech-to-text (STT) using local Whisper models or OpenAI API
 - Text-to-speech (TTS) using pyttsx3 for local synthesis
 - Audio recording and playback utilities
 """
@@ -10,6 +10,7 @@ Provides:
 import logging
 import io
 import os
+import tempfile
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
@@ -31,12 +32,31 @@ except ImportError:
     AUDIO_RECORD_AVAILABLE = False
     logger.warning("sounddevice/soundfile not installed. Audio recording will be disabled.")
 
+# OpenAI Whisper API (cloud-based, requires API key)
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
-    logger.warning("openai not installed. Whisper STT will be disabled.")
+    logger.warning("openai not installed. OpenAI Whisper API will be disabled.")
+
+# Local Whisper models (open source, runs locally)
+try:
+    import whisper
+    WHISPER_LOCAL_AVAILABLE = True
+    logger.info("Local Whisper model available (open source)")
+except ImportError:
+    WHISPER_LOCAL_AVAILABLE = False
+    logger.info("Local Whisper not installed. Install with: pip install openai-whisper")
+
+# Faster Whisper (optimized local implementation)
+try:
+    from faster_whisper import WhisperModel
+    FASTER_WHISPER_AVAILABLE = True
+    logger.info("Faster Whisper available (optimized open source)")
+except ImportError:
+    FASTER_WHISPER_AVAILABLE = False
+    logger.info("Faster Whisper not installed. Install with: pip install faster-whisper")
 
 
 @dataclass
@@ -44,8 +64,9 @@ class VoiceConfig:
     """Configuration for voice features."""
     # STT Configuration
     stt_enabled: bool = True
+    stt_backend: str = "auto"  # "auto", "openai", "local", "faster-whisper"
     stt_language: str = "en"
-    stt_model: str = "whisper-1"
+    stt_model: str = "base"  # For local: tiny, base, small, medium, large
     
     # TTS Configuration
     tts_enabled: bool = True
@@ -60,28 +81,67 @@ class VoiceConfig:
 
 
 class VoiceProcessor:
-    """Handles speech-to-text and text-to-speech operations."""
+    """Handles speech-to-text and text-to-speech operations with multiple backends."""
     
     def __init__(self, config: Optional[VoiceConfig] = None, openai_api_key: Optional[str] = None):
         """Initialize voice processor.
         
         Args:
             config: VoiceConfig object with voice settings
-            openai_api_key: OpenAI API key for Whisper STT (uses OPENAI_API_KEY env var if not provided)
+            openai_api_key: OpenAI API key for OpenAI Whisper API (optional)
         """
         self.config = config or VoiceConfig()
         self.openai_client = None
+        self.whisper_model = None
+        self.faster_whisper_model = None
         
-        # Initialize OpenAI client for Whisper STT
-        if self.config.stt_enabled and OPENAI_AVAILABLE:
+        # Determine STT backend
+        if self.config.stt_backend == "auto":
+            if FASTER_WHISPER_AVAILABLE:
+                self.config.stt_backend = "faster-whisper"
+            elif WHISPER_LOCAL_AVAILABLE:
+                self.config.stt_backend = "local"
+            elif OPENAI_AVAILABLE:
+                self.config.stt_backend = "openai"
+            else:
+                self.config.stt_enabled = False
+                logger.warning("No STT backend available")
+        
+        # Initialize OpenAI Whisper API
+        if self.config.stt_backend == "openai" and OPENAI_AVAILABLE:
             api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
             if api_key:
                 self.openai_client = OpenAI(api_key=api_key)
+                logger.info("Using OpenAI Whisper API for STT")
             else:
-                logger.warning("OPENAI_API_KEY not found. Whisper STT will be disabled.")
+                logger.warning("OPENAI_API_KEY not found. Switching to local Whisper.")
+                self.config.stt_backend = "local"
+        
+        # Initialize local Whisper model
+        if self.config.stt_backend == "local" and WHISPER_LOCAL_AVAILABLE:
+            try:
+                logger.info(f"Loading local Whisper model: {self.config.stt_model}")
+                self.whisper_model = whisper.load_model(self.config.stt_model)
+                logger.info("Local Whisper model loaded (open source)")
+            except Exception as e:
+                logger.error(f"Failed to load local Whisper: {e}")
                 self.config.stt_enabled = False
         
-        # Initialize pyttsx3 for local TTS
+        # Initialize Faster Whisper model
+        if self.config.stt_backend == "faster-whisper" and FASTER_WHISPER_AVAILABLE:
+            try:
+                logger.info(f"Loading Faster Whisper model: {self.config.stt_model}")
+                self.faster_whisper_model = WhisperModel(
+                    self.config.stt_model,
+                    device="cpu",  # Use "cuda" if GPU available
+                    compute_type="int8"  # Quantized for speed
+                )
+                logger.info("Faster Whisper model loaded (optimized open source)")
+            except Exception as e:
+                logger.error(f"Failed to load Faster Whisper: {e}")
+                self.config.stt_enabled = False
+        
+        # Initialize pyttsx3 for local TTS (already open source)
         self.tts_engine = None
         if self.config.tts_enabled and PYTTSX3_AVAILABLE:
             try:
@@ -135,7 +195,7 @@ class VoiceProcessor:
             return None, None
     
     def speech_to_text(self, audio_bytes: bytes, language: Optional[str] = None) -> Optional[str]:
-        """Convert speech to text using OpenAI's Whisper API.
+        """Convert speech to text using selected Whisper backend.
         
         Args:
             audio_bytes: Raw audio data (WAV/MP3/etc.)
@@ -144,32 +204,73 @@ class VoiceProcessor:
         Returns:
             Transcribed text or None if transcription failed
         """
-        if not self.config.stt_enabled or not self.openai_client:
-            logger.warning("STT not enabled or OpenAI client unavailable")
+        if not self.config.stt_enabled:
+            logger.warning("STT not enabled")
             return None
         
         if not audio_bytes:
             logger.warning("No audio data provided")
             return None
         
+        language = language or self.config.stt_language
+        
         try:
-            language = language or self.config.stt_language
+            # OpenAI Whisper API
+            if self.config.stt_backend == "openai" and self.openai_client:
+                audio_file = io.BytesIO(audio_bytes)
+                audio_file.name = "audio.wav"
+                
+                transcript = self.openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=language,
+                    temperature=0.0
+                )
+                text = transcript.text.strip()
+                logger.info(f"Transcribed (OpenAI): {text}")
+                return text
             
-            # Create file-like object for Whisper API
-            audio_file = io.BytesIO(audio_bytes)
-            audio_file.name = "audio.wav"
+            # Local Whisper (open source)
+            elif self.config.stt_backend == "local" and self.whisper_model:
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    tmp.write(audio_bytes)
+                    tmp_path = tmp.name
+                
+                try:
+                    result = self.whisper_model.transcribe(
+                        tmp_path,
+                        language=language,
+                        fp16=False  # CPU compatibility
+                    )
+                    text = result["text"].strip()
+                    logger.info(f"Transcribed (Local Whisper): {text}")
+                    return text
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
             
-            # Transcribe
-            transcript = self.openai_client.audio.transcriptions.create(
-                model=self.config.stt_model,
-                file=audio_file,
-                language=language,
-                temperature=0.0
-            )
+            # Faster Whisper (optimized open source)
+            elif self.config.stt_backend == "faster-whisper" and self.faster_whisper_model:
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    tmp.write(audio_bytes)
+                    tmp_path = tmp.name
+                
+                try:
+                    segments, info = self.faster_whisper_model.transcribe(
+                        tmp_path,
+                        language=language,
+                        beam_size=5
+                    )
+                    text = " ".join([segment.text for segment in segments]).strip()
+                    logger.info(f"Transcribed (Faster Whisper): {text}")
+                    return text
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
             
-            text = transcript.text.strip()
-            logger.info(f"Transcribed: {text}")
-            return text
+            else:
+                logger.error(f"No valid STT backend available: {self.config.stt_backend}")
+                return None
             
         except Exception as e:
             logger.error(f"Speech-to-text failed: {e}")

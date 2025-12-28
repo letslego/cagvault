@@ -17,9 +17,14 @@ dependencies = [
     "llama-index-llms-ollama>=0.4.0",
     "llama-index-embeddings-huggingface>=0.4.0",
     "sentence-transformers>=2.2.0",
-    # Voice features (optional)
-    "pyttsx3>=2.90",
-    "sounddevice>=0.4.5",
-    "soundfile>=0.12.1",
-    "openai>=1.0.0",
+    # Voice features (optional) - choose one STT backend:
+    # - For local open-source STT (recommended): faster-whisper OR openai-whisper
+    # - For cloud API STT: openai
+    "pyttsx3>=2.90",      # TTS (open source, always local)
+    "sounddevice>=0.4.5",  # Audio recording
+    "soundfile>=0.12.1",   # Audio file I/O
+    # Uncomment ONE of these for STT:
+    # "faster-whisper>=0.10.0",  # Fast local Whisper (recommended, open source)
+    # "openai-whisper>=20231117",  # Standard local Whisper (open source)
+    # "openai>=1.0.0",  # OpenAI API (cloud, requires API key)
 ]

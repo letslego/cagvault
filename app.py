@@ -1165,7 +1165,6 @@ with st.sidebar:
                         key="voice_record_duration",
                         help="Maximum recording time"
                     )
-                    st.session_state.voice_record_duration = record_duration
                 
                 if enable_voice_output:
                     st.caption("🔊 **Voice Output Settings**")
@@ -1180,7 +1179,6 @@ with st.sidebar:
                             key="voice_tts_rate",
                             help="Words per minute"
                         )
-                        st.session_state.voice_tts_rate = tts_rate
                     
                     with col2:
                         tts_volume = st.slider(
@@ -1191,7 +1189,6 @@ with st.sidebar:
                             step=0.1,
                             key="voice_tts_volume"
                         )
-                        st.session_state.voice_tts_volume = tts_volume
     else:
         with st.expander("🎤 **Voice Features (Disabled)**", expanded=False):
             st.warning(
