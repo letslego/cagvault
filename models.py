@@ -9,10 +9,11 @@ def create_llm(model_config: ModelConfig) -> BaseChatModel:
             model=model_config.name,
             temperature=model_config.temperature,
             num_ctx=Config.OLLAMA_CONTEXT_WINDOW,
+            base_url=Config.OLLAMA_BASE_URL,
             verbose=False,
             keep_alive=-1,
+            num_parallel=Config.OLLAMA_NUM_PARALLEL,  # Enable concurrent requests
+            timeout=Config.REQUEST_TIMEOUT,
         )
     elif model_config.provider == ModelProvider.GROQ:
         return ChatGroq(model=model_config.name, temperature=model_config.temperature)
-    else:
-        raise ValueError(f"Unsupported provider: {model_config.provider}")

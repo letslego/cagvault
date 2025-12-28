@@ -10,12 +10,13 @@ import json
 import os
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 import re
 import sys
 from pathlib import Path
-import redis 
+
+from lancedb_cache import get_lancedb_store
 
 from .ner_search import NamedEntityRecognizer, FullTextSearchEngine, EnhancedSearchableParser
 from .credit_analyst_prompt import get_credit_analyst
@@ -260,23 +261,8 @@ class EnhancedPDFParserSkill:
         self.parser = PDFParserSkill()
         self.memory = SectionMemoryStore()
         self.search_parser = EnhancedSearchableParser(llm=None)  # Agentic uses Claude SDK directly
-        self.redis_client = self._init_redis()
+        self.lancedb_store = get_lancedb_store()
         logger.info("EnhancedPDFParserSkill initialized with section memory, search (keyword/semantic/agentic), and NER")
-
-    def _init_redis(self):
-        """Create Redis client if Redis is available."""
-        try:
-            # Try to use REDIS_URL if set, otherwise use default localhost
-            url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-            if redis is None:
-                return None
-            client = redis.Redis.from_url(url)
-            client.ping()
-            logger.info("Redis client initialized")
-            return client
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"Redis unavailable: {exc}")
-            return None
     
     def parse_and_extract_sections(self, file_path: str) -> Dict[str, Any]:
         """
@@ -284,14 +270,13 @@ class EnhancedPDFParserSkill:
         
         Uses LLM to intelligently detect sections and track accurate page ranges.
         """
-        # Short-circuit if already cached in Redis using the same document id as the parser cache key
+        # Short-circuit if already stored in LanceDB using the same document id as the parser cache key
         document_id: Optional[str] = None
-        if self.redis_client:
-            cache_key = self.parser._generate_cache_key(str(file_path))
-            document_id = f"pdf_{cache_key}"
-            cached = self._load_document_from_redis(document_id)
-            if cached:
-                return cached
+        cache_key = self.parser._generate_cache_key(str(file_path))
+        document_id = f"pdf_{cache_key}"
+        cached = self._load_document_from_lancedb(document_id)
+        if cached:
+            return cached
         
         # Parse document using standard parser
         doc = self.parser.parse_pdf(file_path)
@@ -407,8 +392,8 @@ class EnhancedPDFParserSkill:
         # Index for search and NER before persistence
         self._index_sections(doc.id, self.memory.get_document_sections(doc.id))
 
-        # Persist to Redis if available
-        self._store_document_in_redis(
+        # Persist to LanceDB for reuse
+        self._persist_to_lancedb(
             document_id=doc.id,
             document_name=doc.name,
             total_pages=total_pages,
@@ -479,7 +464,7 @@ class EnhancedPDFParserSkill:
         
         logger.info(f"✓ Completed parallel analysis of {len(all_sections)} sections")
 
-    def _store_document_in_redis(
+    def _persist_to_lancedb(
         self,
         document_id: str,
         document_name: str,
@@ -487,140 +472,94 @@ class EnhancedPDFParserSkill:
         extraction_method: str,
         sections: List[Section]
     ) -> None:
-        """Store document metadata, sections, and subsections in Redis (idempotent)."""
-        if not self.redis_client:
-            return
+        """Persist sections and metadata to LanceDB (idempotent)."""
         try:
-            meta_key = f"doc:{document_id}:meta"
-            sections_key = f"doc:{document_id}:sections"
-            section_ids_key = f"doc:{document_id}:section_ids"
-            sections_full_key = f"doc:{document_id}:sections_full"
-            doc_keywords_key = f"doc:{document_id}:keywords"
-            doc_entities_key = f"doc:{document_id}:entities"
             all_sections = self._flatten_sections(sections)
-            # Metadata
-            meta_payload = {
-                "document_id": document_id,
-                "document_name": document_name,
-                "pages": total_pages,
-                "extraction_method": extraction_method,
-                "stored_at": datetime.now().isoformat()
-            }
-            self.redis_client.set(meta_key, json.dumps(meta_payload))
-            # Sections and subsections
-            pipe = self.redis_client.pipeline()
-            pipe.delete(section_ids_key)
-            pipe.delete(doc_keywords_key)
-            pipe.delete(doc_entities_key)
-            pipe.delete(sections_full_key)
+            keywords_map: Dict[str, List[str]] = {}
+            entities_map: Dict[str, List[Dict[str, Any]]] = {}
 
-            doc_keywords: set[str] = set()
-            doc_entities: List[Dict[str, Any]] = []
-            all_payloads: List[Dict[str, Any]] = []
             for section in all_sections:
                 sid = section.metadata.id
-                sec_key = f"doc:{document_id}:section:{sid}"
-                # Derive keywords and entities from search/NER index
                 keywords = self.search_parser.search_engine._tokenize(section.content) if self.search_parser else []
                 entities = self.search_parser.get_section_entities(sid)
-                doc_keywords.update(keywords)
-                for ent in entities:
-                    ent_with_section = dict(ent)
-                    ent_with_section["section_id"] = sid
-                    doc_entities.append(ent_with_section)
-                payload = {
-                    "id": sid,
-                    "title": section.metadata.title,
-                    "level": section.metadata.level,
-                    "parent_id": section.metadata.parent_id,
-                    "content": section.content,
-                    "metadata": asdict(section.metadata),
-                    "document_id": document_id,
-                    "keywords": keywords,
-                    "entities": entities,
-                }
-                pipe.set(sec_key, json.dumps(payload))
-                pipe.rpush(section_ids_key, sid)
-                all_payloads.append(payload)
-            # Keep ordered list of sections + subsections
-            pipe.set(sections_key, json.dumps([s.metadata.id for s in all_sections]))
-            pipe.set(sections_full_key, json.dumps(all_payloads))
-            pipe.set(doc_keywords_key, json.dumps(sorted(doc_keywords)))
-            pipe.set(doc_entities_key, json.dumps(doc_entities))
-            pipe.execute()
-            logger.info(f"Stored document {document_id} with {len(all_sections)} sections in Redis")
+                keywords_map[sid] = keywords
+                entities_map[sid] = entities
+
+            file_type = getattr(getattr(self.parser, "metadata", None), "file_type", None)
+            file_size = getattr(getattr(self.parser, "metadata", None), "file_size", None)
+
+            self.lancedb_store.upsert_sections(
+                document_id=document_id,
+                document_name=document_name,
+                sections=all_sections,
+                total_pages=total_pages,
+                extraction_method=extraction_method,
+                source="upload",
+                file_type=file_type,
+                file_size=file_size,
+                upload_date=datetime.now(UTC).isoformat(),
+                keywords_map=keywords_map,
+                entities_map=entities_map,
+            )
+            logger.info(f"Stored document {document_id} with {len(all_sections)} sections in LanceDB")
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Failed to store in Redis: {exc}")
+            logger.warning(f"Failed to store in LanceDB: {exc}")
 
-    def _load_document_from_redis(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Load document metadata and sections from Redis into memory.
-
-        Returns cached stats dict matching the parse response shape or None on miss.
-        """
-        if not self.redis_client:
+    def _load_document_from_lancedb(self, document_id: str, document_name: str = "") -> Optional[Dict[str, Any]]:
+        """Load document metadata and sections from LanceDB into memory."""
+        records = self.lancedb_store.load_sections(document_id)
+        if not records:
             return None
 
-        meta_key = f"doc:{document_id}:meta"
-        sections_key = f"doc:{document_id}:sections"
-        section_ids_key = f"doc:{document_id}:section_ids"
+        # Skip if already hydrated
+        existing_sections = self.memory.get_document_sections(document_id)
+        if existing_sections:
+            return {
+                "document_id": document_id,
+                "document_name": document_name,
+                "pages": existing_sections[0].metadata.end_page if existing_sections else 0,
+                "sections_extracted": len(existing_sections),
+                "extraction_method": "lancedb_cache",
+                "message": "Document already in memory; skipped LanceDB reload",
+            }
 
         try:
-            meta_raw = self.redis_client.get(meta_key)
-            if not meta_raw:
-                return None
-
-            meta = json.loads(meta_raw)
-
-            # Skip rehydration if sections are already in memory to avoid duplicate adds/logs
-            existing_sections = self.memory.get_document_sections(document_id)
-            if existing_sections:
-                logger.info(
-                    f"Document {document_id} already hydrated in memory; skipping Redis reload"
-                )
-                return {
-                    "document_id": document_id,
-                    "document_name": meta.get("document_name", ""),
-                    "pages": meta.get("pages", 0),
-                    "sections_extracted": len(existing_sections),
-                    "extraction_method": meta.get("extraction_method", "redis_cache"),
-                    "message": "Document already in memory; skipped Redis reload",
-                }
-
-            # Clear any existing in-memory copy for this document to avoid duplication
             self.memory.clear_document(document_id)
-
-            # Retrieve ordered section ids; fall back to stored list value if list is empty
-            section_ids = [
-                sid.decode("utf-8") if isinstance(sid, (bytes, bytearray)) else sid
-                for sid in self.redis_client.lrange(section_ids_key, 0, -1)
-            ]
-            if not section_ids:
-                stored_list = self.redis_client.get(sections_key)
-                if stored_list:
-                    section_ids = json.loads(stored_list)
-
+            ordered = sorted(records, key=lambda r: r.get("order_idx", 0))
             section_map: Dict[str, Section] = {}
-            for sid in section_ids:
-                sec_raw = self.redis_client.get(f"doc:{document_id}:section:{sid}")
-                if not sec_raw:
-                    continue
-                payload = json.loads(sec_raw)
-                metadata_dict = payload.get("metadata", {}) or {}
-                # Ensure optional list fields are not None
-                metadata_dict["typical_dependencies"] = metadata_dict.get("typical_dependencies") or []
-                meta_obj = SectionMetadata(**metadata_dict)
-                meta_obj.id = payload.get("id", sid)
+            root_sections: List[Section] = []
+
+            for row in ordered:
+                meta_dict = json.loads(row.get("metadata_json", "{}")) or {}
+                meta_dict["typical_dependencies"] = meta_dict.get("typical_dependencies") or []
+                meta_dict.setdefault("title", row.get("title", ""))
+                meta_dict.setdefault("level", row.get("level", 1))
+                meta_dict.setdefault("start_line", meta_dict.get("start_line", 0))
+                meta_dict.setdefault("end_line", meta_dict.get("end_line", 0))
+                meta_dict.setdefault("content_length", meta_dict.get("content_length", len(row.get("content", ""))))
+                meta_dict.setdefault("word_count", meta_dict.get("word_count", len(row.get("content", "").split())))
+                meta_dict.setdefault("has_code", meta_dict.get("has_code", False))
+                meta_dict.setdefault("has_tables", meta_dict.get("has_tables", False))
+                meta_dict.setdefault("subsection_count", meta_dict.get("subsection_count", 0))
+                meta_dict.setdefault("page_estimate", meta_dict.get("page_estimate", 1))
+                meta_dict.setdefault("page_range", meta_dict.get("page_range", "1"))
+                meta_dict.setdefault("start_page", meta_dict.get("start_page", 1))
+                meta_dict.setdefault("end_page", meta_dict.get("end_page", meta_dict.get("start_page", 1)))
+                meta_obj = SectionMetadata(**meta_dict)
+                meta_obj.id = meta_dict.get("id") or row.get("section_id")
                 section = Section(
                     metadata=meta_obj,
-                    content=payload.get("content", ""),
+                    content=row.get("content", ""),
                     document_id=document_id,
-                    subsections=[]
+                    subsections=[],
                 )
                 section_map[meta_obj.id] = section
 
-            # Rebuild hierarchy and repopulate memory store in the original order
-            root_sections: List[Section] = []
-            for sid in section_ids:
+            for row in ordered:
+                meta_json = json.loads(row.get("metadata_json", "{}")) or {}
+                sid = row.get("section_id") or meta_json.get("id")
+                if sid is None:
+                    continue
                 section = section_map.get(sid)
                 if not section:
                     continue
@@ -631,25 +570,22 @@ class EnhancedPDFParserSkill:
                     root_sections.append(section)
                 self.memory.add_section(document_id, section, parent_id=parent_id)
 
-            # Re-index for search and NER
             self._index_sections(document_id, root_sections)
-
-            logger.info(f"Loaded document {document_id} from Redis cache")
             return {
                 "document_id": document_id,
-                "document_name": meta.get("document_name", ""),
-                "pages": meta.get("pages", 0),
-                "sections_extracted": len(section_ids),
-                "extraction_method": meta.get("extraction_method", "redis_cache"),
-                "message": "Loaded document from Redis cache (skipped parsing)",
+                "document_name": document_name or (ordered[0].get("document_name") if ordered else document_id),
+                "pages": ordered[0].get("total_pages", 0) if ordered else 0,
+                "sections_extracted": len(ordered),
+                "extraction_method": "lancedb_cache",
+                "message": "Loaded document from LanceDB cache (skipped parsing)",
             }
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Failed to load from Redis: {exc}")
+            logger.warning(f"Failed to load from LanceDB: {exc}")
             return None
 
-    def load_document_from_redis(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Public wrapper to hydrate a document from Redis cache."""
-        return self._load_document_from_redis(document_id)
+    def load_document_from_lancedb(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Public wrapper to hydrate a document from LanceDB cache."""
+        return self._load_document_from_lancedb(document_id)
     
     def _annotate_with_pages(self, markdown_content: str, total_pages: int) -> str:
         """
@@ -1044,21 +980,13 @@ class EnhancedPDFParserSkill:
             ]
         }
 
-    def list_redis_documents(self) -> List[Dict[str, Any]]:
-        """List documents stored in Redis (metadata only)."""
-        if not self.redis_client:
-            return []
-        docs = []
+    def list_lancedb_documents(self) -> List[Dict[str, Any]]:
+        """List documents stored in LanceDB (metadata only)."""
         try:
-            for meta_key in self.redis_client.scan_iter(match="doc:*:meta"):
-                raw = self.redis_client.get(meta_key)
-                if not raw:
-                    continue
-                meta = json.loads(raw)
-                docs.append(meta)
+            return self.lancedb_store.list_documents()
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Failed to list Redis documents: {exc}")
-        return docs
+            logger.warning(f"Failed to list LanceDB documents: {exc}")
+            return []
     
     def verify_document_coverage(self, document_id: str) -> Dict[str, Any]:
         """

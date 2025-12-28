@@ -1,14 +1,13 @@
 # CagVault
 
-A **Cache-Augmented Generation (CAG)** application for private, local document chat using large language models with intelligent document parsing, Redis-backed caching, and credit agreement analysis capabilities.
+A **Cache-Augmented Generation (CAG)** application for private, local document chat using large language models with intelligent document parsing, LanceDB-backed persistent storage, and credit agreement analysis capabilities.
 
 ## 🚀 Quick Start (5 Minutes)
 
 ```bash
 # 1. Install prerequisites
-brew install ollama redis
+brew install ollama
 brew services start ollama
-brew services start redis
 
 # 2. Clone and setup
 git clone https://github.com/letslego/cagvault.git
@@ -40,6 +39,28 @@ streamlit run app.py
 
 ## 🎯 What's New (December 2025)
 
+**🤖 Agentic RAG System:**
+- 🧠 **Multi-Step Reasoning**: Agent understands intent, selects strategy, validates answers
+- 🎯 **5 Retrieval Strategies**: Semantic, Keyword, Hybrid, Agentic, Entity-based (auto-selected)
+- ✅ **Self-Reflection**: Optional answer validation with confidence scoring
+- 📊 **Full Transparency**: Complete reasoning traces showing agent's thought process
+- 🎓 **Smart Strategy Selection**: Automatically chooses best approach based on query type
+- 🔧 **Claude Agent SDK Integration**: 6 specialized MCP tools built with Agent SDK:
+  - 🌐 **Web Search**: Fetch current data from external sources (@tool decorator)
+  - 🏷️ **Entity Extraction**: Extract dates, amounts, names, organizations (NER-based)
+  - 📊 **Section Ranking**: Prioritize important sections using credit analyst criteria
+  - 🔗 **Cross-Document Relationships**: Find references, amendments, guarantees
+  - 🔍 **Fact Verification**: Validate claims against web sources
+  - 💡 **Follow-Up Suggestions**: Intelligent next-question recommendations
+
+**Storage Architecture Upgrade:**
+- 🗄️ **LanceDB Embedded Database**: Replaced Redis with LanceDB for all persistent storage
+- ⚡ **In-Process Caching**: 3-second TTL DataFrame cache for sub-millisecond reads
+- 🔍 **Full-Text Search**: Built-in FTS indexes on content, titles, and questions
+- 📦 **Zero External Dependencies**: No separate database server required - all data in `./lancedb`
+- 🔄 **Redis Migration Tool**: One-time utility to import existing Redis data
+- 🔒 **ACID Compliance**: Reliable transactions with automatic cache invalidation
+
 **Enhanced PDF Intelligence:**
 - 🔬 **LLM-Powered Section Analysis**: Parallel processing with credit analyst classification and importance scoring
 - 📊 **Smart Section Extraction**: Hierarchical document structure with page-accurate tracking
@@ -48,7 +69,7 @@ streamlit run app.py
 - 📌 **Referenced Section Display**: Automatically expand cited sections in chat responses
 
 **Intelligent Caching System:**
-- 💾 **Q&A Cache**: Redis-backed answer caching per document with 24-hour TTL
+- 💾 **Q&A Cache**: LanceDB-backed answer caching per document with persistent storage
 - 📚 **Question Library**: Track popular questions by category with autocomplete suggestions
 - ⚡ **KV-Cache Optimization**: 10-40x faster multi-turn conversations
 - 📈 **Cache Analytics**: Real-time statistics and per-document cache management
@@ -168,6 +189,47 @@ Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You N
 - ✅ **Eliminates Retrieval Errors**: All relevant information is guaranteed to be available
 - ✅ **Perfect for Constrained Knowledge Bases**: Ideal when all documents fit in context window
 
+## 🏗️ Architecture Overview
+
+CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Agent SDK tools, and LanceDB-backed storage.
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                              Browser                               │
+│                   Streamlit UI (app.py)                            │
+│  - Chat with reasoning trace and skill tags                        │
+│  - Upload/parse PDFs and manage caches                             │
+│  - Question library + sections/entities explorer                   │
+└───────────────┬────────────────────────────────────────────────────┘
+                │ questions, uploads, actions
+┌───────────────▼────────────────────────────────────────────────────┐
+│                           Agent Brain                              │
+│  Router: question classifier + skill inference                     │
+│  Planner: chooses cached answer, retrieval, or tool use            │
+│  Reasoner: Claude/Ollama models with KV-cache + reflection         │
+│  Tools (Claude Agent SDK via MCP):                                 │
+│    • web_search • entity_extractor • section_ranker                │
+│    • cross_doc_links • fact_verifier • followup_suggester          │
+│  Skills: PDF parser, TOC/NER search, credit analyst prompts,       │
+│          knowledge-base skill registry                             │
+│  Caches: Q&A cache, question library, KV-cache, DataFrame cache    │
+└───────────────┬────────────────────────────────────────────────────┘
+                │ retrieval + storage calls
+┌───────────────▼────────────────────────────────────────────────────┐
+│                      Storage and Engines                           │
+│  LanceDB (embedded): doc_sections, qa_cache, question_library      │
+│  Search: full-text, semantic, agentic rerank, entity filters       │
+│  Runtimes: Ollama models, CAG MCP server hosting the tools         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Flows:**
+- **Upload/Parse → LanceDB**: PDFs run through Docling + LLM section analysis, saved to `doc_sections` with entities and TOC metadata.
+- **Ask → Router → Cache**: Questions first check KV-cache/Q&A cache/question library before invoking the LLM.
+- **Retrieval/Tools**: When needed, the agent retrieves sections from LanceDB or calls MCP tools (web, entity, ranking, cross-doc, verification, follow-ups).
+- **Answering**: Responses stream with reasoning trace, cited sections, and the skills/tools used for transparency.
+- **Persistence**: All storage is local (LanceDB + optional caches); no cloud services are required.
+
 ## Core Features
 
 ### 🔒 Privacy & Security
@@ -213,7 +275,7 @@ Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You N
 - **Concurrent Request Handling**: 4 parallel LLM workers for simultaneous requests
 - **Parallel Processing**: Concurrent LLM calls for faster document analysis (4 workers)
 - **Smart Page Estimation**: Word-based calculation for instant section mapping
-- **Memory Management**: In-memory section store with Redis persistence
+- **Memory Management**: In-memory section store with LanceDB persistence
 - **Connection Pooling**: Optimized Ollama connections with timeout management
 
 ## Prerequisites
@@ -225,12 +287,13 @@ Based on the paper [*"Don't Do RAG: When Cache-Augmented Generation is All You N
 - At least 10GB free disk space (for the LLM model)
 - 16GB RAM recommended (8GB minimum for 7B models)
 
-### Optional
-- **Redis** (for Q&A cache and question library)
-  - Install: `brew install redis` (macOS) or `apt-get install redis` (Linux)
-  - Start: `brew services start redis` or `redis-server &`
-  - If Redis is not running, the app will fall back to memory-only caching
-  - Required for: Q&A cache, question library, persistent document sections
+### Data Storage
+- **LanceDB** (included with dependencies)
+  - Embedded vector database for persistent storage
+  - No separate installation or server required
+  - Automatically stores: Q&A cache, question library, parsed document sections
+  - Database location: `./lancedb` directory
+  - Migration tool available for existing Redis users (see below)
 
 ## Installation
 
@@ -433,32 +496,26 @@ ollama search llama3
 ollama pull <model-name>
 ```
 
-### 6. (Optional) Install and Start Redis
+### 6. (Optional) Migrate from Redis
 
-Redis enables persistent Q&A caching, question library, and document section storage. The app will work without Redis but with limited caching.
+If you have existing data in Redis, you can migrate it to LanceDB:
 
-#### macOS:
-```bash
-brew install redis
-brew services start redis
+```python
+# In Python console or script
+from lancedb_cache import get_lancedb_store
+import redis
+
+# Connect to your Redis instance
+redis_client = redis.from_url("redis://localhost:6379/0")
+
+# Migrate all data (documents, Q&A cache, question library)
+store = get_lancedb_store()
+store.migrate_from_redis(redis_client)
+
+print("Migration complete! Redis data imported to LanceDB.")
 ```
 
-#### Linux:
-```bash
-sudo apt-get install redis-server
-sudo systemctl start redis
-```
-
-Verify Redis is running:
-```bash
-redis-cli ping  # Should return "PONG"
-```
-
-**Environment Configuration:**
-```bash
-# Optional: Set custom Redis URL (default is redis://localhost:6379/0)
-export REDIS_URL="redis://localhost:6379/0"
-```
+**Note**: After migration, you can optionally remove Redis. LanceDB is now the default persistent storage and requires no separate server.
 
 ### 7. Verify Installation
 
@@ -471,11 +528,8 @@ python --version  # Should show 3.12.x or 3.14.x
 # Ollama service
 ollama list  # Should show your downloaded models
 
-# Redis (optional)
-redis-cli ping  # Should return "PONG" if Redis is running
-
 # Python packages
-pip list | grep -E "(streamlit|langchain|docling|redis)"
+pip list | grep -E "(streamlit|langchain|docling|lancedb)"
 ```
 
 ## Running the Application
@@ -504,10 +558,10 @@ The application will open in your browser at `http://localhost:8504`
 - Paste a web URL in the text input
 - Click "Add Web Page" to scrape and convert to text
 
-**From Redis Cache:**
-- Click "🗄️ Documents in Redis" expander
+**From LanceDB:**
+- Click "🗄️ Documents in LanceDB" expander
 - Select a previously parsed document
-- Click "Load for chat" to restore from cache
+- Click "Load for chat" to restore from persistent storage
 
 #### 2. Explore Document Structure
 
@@ -556,8 +610,8 @@ The application will open in your browser at `http://localhost:8504`
 - Includes page ranges and section metadata
 
 **Cache Status:**
-- Green "💾 Using cached response" = instant retrieval from Redis
-- No indicator = fresh LLM generation + automatic caching
+- Green "💾 Using cached response" = instant retrieval from LanceDB
+- No indicator = fresh LLM generation + automatic caching to LanceDB
 
 #### 5. Manage Caches
 
@@ -569,7 +623,7 @@ The application will open in your browser at `http://localhost:8504`
 - View cached Q&A pairs per document
 - Browse questions with thinking and responses
 - Clear per-document cache or all Q&A cache
-- Monitor Redis memory usage
+- Persistent storage in LanceDB (no memory limits)
 
 **Question Library:**
 - Search library with autocomplete
@@ -587,10 +641,15 @@ cagvault/
 ├── knowledge.py                    # Document loading and conversion
 ├── chatbot.py                      # Chat logic with streaming and prompts
 ├── kvcache.py                      # KV-Cache manager for context caching
-├── qa_cache.py                     # Redis-backed Q&A caching system
+├── lancedb_cache.py                # LanceDB storage layer with in-process cache
+├── qa_cache.py                     # LanceDB-backed Q&A caching system
 ├── question_library.py             # Question library with categorization
 ├── simple_cag.py                   # Simplified CAG implementation
 ├── pyproject.toml                  # Python dependencies
+├── lancedb/                        # LanceDB embedded database directory
+│   ├── doc_sections.lance/         # Document sections table
+│   ├── qa_cache.lance/             # Q&A cache table
+│   └── question_library.lance/    # Question library table
 ├── skills/
 │   └── pdf_parser/
 │       ├── pdf_parser.py           # Core PDF parsing (Docling)
@@ -733,29 +792,24 @@ lsof -i :11434 | wc -l  # Count active connections
 
 See [CONCURRENT_REQUESTS.md](CONCURRENT_REQUESTS.md) for detailed tuning guide.
 
-### Redis Connection Issues
+### LanceDB Storage Issues
 
-**Error**: Cannot connect to Redis or "Redis unavailable" warnings
+**Error**: Database connection or table access issues
 
 **Solution**: 
 ```bash
-# Check if Redis is running
-redis-cli ping
+# Check LanceDB directory permissions
+ls -la ./lancedb
 
-# If not running, start it
-brew services start redis  # macOS
-# or
-redis-server &  # Linux
+# If corrupted, remove and restart (will lose cached data)
+rm -rf ./lancedb
+streamlit run app.py  # Tables will be recreated
 
-# Check Redis URL
-echo $REDIS_URL  # Should be redis://localhost:6379/0 or similar
+# To inspect LanceDB contents
+python -c "import lancedb; db = lancedb.connect('./lancedb'); print(db.list_tables().tables)"
 ```
 
-**Fallback**: The app will work without Redis but with limited caching:
-- No Q&A cache
-- No question library
-- No persistent document sections
-- KV-Cache will use memory-only mode
+**Note**: LanceDB is embedded and requires no separate server. All data is stored locally in the `./lancedb` directory.
 
 ### KV-Cache Issues
 
@@ -774,16 +828,15 @@ rm -rf .cache/kvcache/
 If cached answers seem outdated or incorrect:
 
 ```bash
-# Clear Redis Q&A cache via UI:
+# Clear Q&A cache via UI:
 # 1. Expand "💾 Q&A Cache Management" in sidebar
 # 2. Click "🗑️ Clear All Q&A Cache"
 
-# Or clear via Redis CLI:
-redis-cli
-> KEYS qa_cache:*
-> DEL qa_cache:*
-> KEYS doc_questions:*
-> DEL doc_questions:*
+# Or clear LanceDB cache programmatically:
+python -c "from qa_cache import get_qa_cache; get_qa_cache().clear_all_cache()"
+
+# Or remove the entire QA table:
+python -c "import lancedb; db = lancedb.connect('./lancedb'); db.drop_table('qa_cache')"
 ```
 
 ### Duplicate Sections / Looping
@@ -798,10 +851,8 @@ If you see repeated sections in the UI or logs:
 pkill -f streamlit
 streamlit run app.py
 
-# Or clear Redis document cache
-redis-cli
-> KEYS doc:*
-> DEL doc:*
+# Or clear LanceDB document cache
+python -c "import lancedb; db = lancedb.connect('./lancedb'); db.drop_table('doc_sections')"
 ```
 
 ### Section References Not Appearing
@@ -890,13 +941,17 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 │           │                                                                 │
 │           ▼                                                                 │
 │  ┌───────────────────────────────────────────────┐                        │
-│  │  Redis Persistence (Optional)                 │                        │
+│  │  LanceDB Persistent Storage (Embedded)        │                        │
 │  │                                                │                        │
-│  │  doc:{doc_id}:meta         → Document metadata │                        │
-│  │  doc:{doc_id}:sections     → Section IDs list  │                        │
-│  │  doc:{doc_id}:section:{id} → Full section data │                        │
-│  │  doc:{doc_id}:keywords     → Search index      │                        │
-│  │  doc:{doc_id}:entities     → NER results       │                        │
+│  │  Table: doc_sections                          │                        │
+│  │  • Hierarchical sections (parent_id, order)   │                        │
+│  │  • Full-text search indexes (content, title)  │                        │
+│  │  • Pre-computed keywords & entities           │                        │
+│  │  • Document metadata (pages, type, size)      │                        │
+│  │                                                │                        │
+│  │  In-Process Cache: 3s TTL DataFrame           │                        │
+│  │  • Sub-millisecond reads for frequent access  │                        │
+│  │  • Thread-safe with automatic invalidation    │                        │
 │  └────────────────────────────────────────────────┘                        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -929,20 +984,24 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 │      │                                                                      │
 │      ▼                                                                      │
 │  ┌─────────────────────────────────────────┐                              │
-│  │  Question Library (Redis)               │                              │
+│  │  Question Library (LanceDB)             │                              │
 │  │                                          │                              │
+│  │  Table: question_library                │                              │
 │  │  • 15+ categories (Definitions, etc.)   │                              │
 │  │  • Usage tracking & popularity          │                              │
-│  │  • Autocomplete suggestions             │                              │
+│  │  • Autocomplete suggestions (FTS)       │                              │
 │  │  • Per-document & global questions      │                              │
+│  │  • In-process cache (3s TTL)            │                              │
 │  └────────┬────────────────────────────────┘                              │
 │           │                                                                 │
 │           ▼                                                                 │
 │  ┌─────────────────────────────────────────┐                              │
-│  │  Q&A Cache (Redis, 24h TTL)             │                              │
+│  │  Q&A Cache (LanceDB)                    │                              │
 │  │                                          │                              │
+│  │  Table: qa_cache                        │                              │
 │  │  Key: sha256(question + doc_ids)        │                              │
 │  │  Value: {response, thinking, metadata}  │                              │
+│  │  FTS Index: question field              │                              │
 │  │                                          │                              │
 │  │  Cache Hit? → Return cached response ✓  │                              │
 │  │  Cache Miss? → Continue to LLM ↓        │                              │
@@ -992,7 +1051,7 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 │  │  <think>...</think> → Reasoning         │                              │
 │  │  Answer → Final response                │                              │
 │  │                                          │                              │
-│  │  • Auto-cache to Redis                  │                              │
+│  │  • Auto-cache to LanceDB                │                              │
 │  │  • Extract section references           │                              │
 │  │  • Track to question library            │                              │
 │  └────────┬────────────────────────────────┘                              │
@@ -1022,7 +1081,7 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  1. UPLOAD: PDF → Docling → Enhanced Parser → Section Analysis (parallel)  │
-│  2. STORE:  Sections → Memory + Redis persistence                          │
+│  2. STORE:  Sections → Memory + LanceDB persistence                        │
 │  3. INDEX:  Keywords + Entities + Semantic embeddings                      │
 │  4. QUERY:  Question → Library + Q&A Cache check                           │
 │  5. SEARCH: Keyword/Semantic/Agentic → Relevant sections                   │
@@ -1038,7 +1097,7 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 
 #### Core Infrastructure
 - **Ollama**: Local LLM inference server (Qwen3-14B)
-- **Redis**: Optional persistence for caches and sections
+- **LanceDB**: Embedded vector database for persistent storage (Q&A cache, sections, questions)
 - **Streamlit**: Interactive web UI with real-time updates
 - **LangChain**: LLM orchestration and streaming
 
@@ -1048,7 +1107,7 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
   - LLM-powered section extraction
   - Parallel importance scoring (ThreadPoolExecutor)
   - Hierarchical structure with page tracking
-  - Redis persistence with deduplication guards
+  - LanceDB persistence with deduplication guards
 - **SectionMemoryStore**: In-memory hierarchical document structure
 - **NamedEntityRecognizer** (`skills/pdf_parser/ner_search.py`): Extract and index entities
 
@@ -1059,12 +1118,124 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 
 #### Caching System
 - **KVCacheManager** (`kvcache.py`): Context state caching with disk persistence
-- **QACacheManager** (`qa_cache.py`): Redis-backed Q&A caching with TTL
-- **QuestionLibraryManager** (`question_library.py`): Question tracking with categorization
+- **QACacheManager** (`qa_cache.py`): LanceDB-backed Q&A caching with persistent storage
+- **QuestionLibraryManager** (`question_library.py`): Question tracking with categorization and usage analytics
+- **LanceDBStore** (`lancedb_cache.py`): Unified storage layer with in-process DataFrame cache (3s TTL)
 
 #### Credit Analysis
 - **CreditAnalystPrompt** (`skills/pdf_parser/credit_analyst_prompt.py`): Section classification and importance
 - **LLMSectionEvaluator** (`skills/pdf_parser/llm_section_evaluator.py`): Batch analysis with parallel processing
+
+#### LanceDB Storage Architecture
+
+**Unified Storage Layer** (`lancedb_cache.py`):
+- **Embedded Vector Database**: No external server required, all data in `./lancedb` directory
+- **Three Main Tables**:
+  1. **doc_sections**: Hierarchical document sections with full-text search
+  2. **qa_cache**: Question-answer pairs with thinking and metadata
+  3. **question_library**: Popular questions with usage tracking and categorization
+
+**Schema Design**:
+```python
+# doc_sections table
+document_id: string          # Unique document identifier
+document_name: string        # Human-readable name
+section_id: string          # Section unique ID
+parent_id: string           # Parent section for hierarchy
+level: int32                # Nesting level (1, 2, 3...)
+order_idx: int32            # Preservation of document order
+title: string               # Section title
+content: string             # Section text content
+keywords: list<string>      # Pre-computed search tokens
+entities_json: string       # NER results (JSON)
+metadata_json: string       # Section metadata
+total_pages: int32          # Document page count
+extraction_method: string   # Parser version/method
+source: string              # Origin (upload, URL, etc.)
+stored_at: string           # Timestamp (ISO 8601)
+
+# qa_cache table
+cache_key: string           # SHA256 hash of question + doc_ids
+question: string            # Original question
+response: string            # LLM answer
+thinking: string            # Reasoning process
+doc_ids: list<string>       # Associated documents
+timestamp: string           # Cache creation time
+metadata_json: string       # Model, source count, etc.
+
+# question_library table
+question: string            # Unique question text (normalized)
+doc_ids: list<string>       # Related documents
+category: string            # Question category
+usage_count: int64          # Popularity metric
+is_default: bool            # Pre-seeded question
+created_at: string          # Creation timestamp
+metadata_json: string       # Additional metadata
+```
+
+**Performance Optimizations**:
+1. **Full-Text Search (FTS) Indexes**:
+   - doc_sections: `content`, `title`, `document_name`
+   - qa_cache: `question`
+   - question_library: `question`
+
+2. **In-Process DataFrame Cache** (3-second TTL):
+   - Caches table contents as pandas DataFrames in memory
+   - Sub-millisecond reads for frequent queries
+   - Thread-safe with locks
+   - Automatic invalidation on writes
+   - Warmed on startup for instant first access
+
+3. **Write Strategy**:
+   - Immediate writes to LanceDB (ACID-compliant)
+   - Cache invalidation triggered after successful write
+   - No blocking - operations complete quickly
+
+**Data Flow**:
+```
+┌──────────────────────────────────────────────────────────┐
+│ Application Request (Read)                               │
+└────────────────┬─────────────────────────────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────┐
+│ Check In-Process Cache (3s TTL)                            │
+│ • Thread-safe lock acquisition                             │
+│ • Check timestamp validity                                 │
+└────┬───────────────────────────────────────────┬───────────┘
+     │ Hit                                       │ Miss
+     ▼                                           ▼
+┌─────────────────┐                   ┌──────────────────────┐
+│ Return DataFrame│                   │ Query LanceDB Table  │
+│ (sub-ms)        │                   │ • Convert to pandas  │
+└─────────────────┘                   │ • Store in cache     │
+                                      │ • Return DataFrame   │
+                                      └──────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ Application Request (Write)                              │
+└────────────────┬─────────────────────────────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────┐
+│ Write to LanceDB                                           │
+│ • ACID transaction                                         │
+│ • Immediate persistence                                    │
+└────────────────┬───────────────────────────────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────┐
+│ Invalidate In-Process Cache                                │
+│ • Remove cached DataFrame                                  │
+│ • Next read will refresh from disk                         │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Migration from Redis**:
+- Optional one-time migration utility: `lancedb_cache.migrate_from_redis(redis_client)`
+- Imports documents, Q&A cache, and question library
+- Preserves all metadata and relationships
+- No data loss during transition
 
 ### Performance Optimizations
 
@@ -1080,16 +1251,17 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 **2. Q&A Cache (Response Level)**
 - **Instant retrieval**: Identical questions return cached answers immediately
 - **Document-aware**: Cache keys include document IDs for precise matching
-- **24-hour TTL**: Auto-expires to keep answers fresh
+- **Persistent storage**: No expiration, manually managed via UI or API
 - **Thinking included**: Caches both reasoning and final response
 - **Per-document management**: Clear cache for specific documents
 
-**3. Document Section Cache (Redis)**
-- **Parse once**: Parsed sections persisted to Redis
-- **Fast reload**: Load document structure without re-parsing
-- **Hierarchical storage**: Maintains parent-child relationships
-- **Search index**: Pre-computed keywords and entities
+**3. Document Section Cache (LanceDB)**
+- **Parse once**: Parsed sections persisted to LanceDB with FTS indexes
+- **Fast reload**: Load document structure without re-parsing (in-process cache)
+- **Hierarchical storage**: Maintains parent-child relationships via order_idx
+- **Search index**: Pre-computed keywords and entities with full-text search
 - **Deduplication guards**: Prevents repeated section additions
+- **In-process cache**: 3-second TTL DataFrame cache for frequent reads
 
 #### Parallel Processing & Concurrent Requests
 
@@ -1194,7 +1366,7 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 - ✅ **Section References**: Auto-expand cited sections in chat responses
 
 ### Caching System
-- ✅ **Q&A Cache**: Redis-backed with 24-hour TTL
+- ✅ **Q&A Cache**: LanceDB-backed with persistent storage
 - ✅ **Question Library**: 15+ categories with autocomplete
 - ✅ **Suggested Questions**: Popular queries by document or global
 - ✅ **Cache Analytics**: Real-time stats and management UI
@@ -1205,19 +1377,19 @@ The precomputed KV cache eliminates the need to reprocess documents for each que
 - ✅ **Cache Indicators**: Visual feedback for cache hits
 - ✅ **Referenced Section Expanders**: Click to view full cited sections
 - ✅ **Browse by Category**: Explore questions by type
-- ✅ **Redis Document Picker**: Load previously parsed documents
+- ✅ **LanceDB Document Picker**: Load previously parsed documents
 
 ### Performance
 - ✅ **Concurrent Request Handling**: 4 parallel LLM workers for simultaneous requests
 - ✅ **Memory Management**: Automatic clearing before fresh loads
 - ✅ **Parallel Processing**: ThreadPoolExecutor for section analysis
-- ✅ **Redis Persistence**: Store parsed sections for instant reload
+- ✅ **LanceDB Persistence**: Store parsed sections with FTS indexes for instant reload
 - ✅ **Word-Based Estimation**: Fast page calculation without LLM calls
 - ✅ **Connection Pooling**: Optimized Ollama connections with timeout management
 
 ### Technical
 - ✅ **Python 3.14 Support**: Compatible with latest Python
-- ✅ **Redis Optional**: Falls back to memory-only if unavailable
+- ✅ **Embedded Storage**: No external database server required
 - ✅ **Enhanced Error Handling**: Better logging and fallbacks
 - ✅ **Document Deduplication**: Prevent duplicate button keys
 
@@ -1258,16 +1430,20 @@ Created by [Amitabha Karmakar](https://www.linkedin.com/in/amitabha-karmakar/)
    - Error message and full traceback
    - Python version (`python --version`)
    - Ollama status (`ollama list`)
-   - Redis status (`redis-cli ping`)
+   - LanceDB tables (`python -c "import lancedb; print(lancedb.connect('./lancedb').list_tables().tables)"`)
    - Steps to reproduce
 
 **Documentation:**
 - CAG Paper: https://arxiv.org/abs/2412.15605v1
 - Implementation Details:
-  - `QA_CACHE_IMPLEMENTATION.md` - Q&A caching system
-  - `QUESTION_LIBRARY_IMPLEMENTATION.md` - Question library design
-  - `PDF_PARSER_SKILL_SUMMARY.md` - Enhanced PDF parsing
-  - `CLAUDE_SKILLS_GUIDE.md` - Claude skills integration
+  - `documentation/AGENTIC_RAG_GUIDE.md` - **NEW!** Multi-step reasoning RAG system
+  - `documentation/AGENT_SDK_INTEGRATION.md` - **NEW!** Claude Agent SDK MCP tools
+  - `documentation/MCP_TOOLS_GUIDE.md` - MCP tools user guide
+  - `documentation/QA_CACHE_IMPLEMENTATION.md` - Q&A caching system
+  - `documentation/QUESTION_LIBRARY_IMPLEMENTATION.md` - Question library design
+  - `documentation/PDF_PARSER_SKILL_SUMMARY.md` - Enhanced PDF parsing
+  - `documentation/CLAUDE_SKILLS_GUIDE.md` - Claude skills integration
+  - `skills/pdf_parser/ENHANCED_PARSER_GUIDE.md` - Advanced document parsing
 
 **Logs & Debugging:**
 ```bash
@@ -1276,7 +1452,7 @@ Created by [Amitabha Karmakar](https://www.linkedin.com/in/amitabha-karmakar/)
 # - Section extraction progress
 # - LLM analysis status
 # - Cache hits/misses
-# - Redis connection status
+# - LanceDB storage status
 # - Entity extraction results
 
 # Enable more verbose logging (if needed):
