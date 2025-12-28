@@ -298,26 +298,51 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 
 The system now includes **OpenLineage-compliant data lineage tracking** to monitor your document processing pipeline:
 
-**View the [Data Lineage Dashboard](pages/lineage_dashboard.py)** to:
-- 📈 Monitor end-to-end data flow from document ingestion → embedding → retrieval → LLM response
-- 📊 Track 6 operation types: ingest, extract_section, embed, store_lancedb, retrieve, llm_response
-- ⏱️ Analyze performance metrics: operation durations, success rates, slowest operations
-- 🔍 Explore data assets: PDF files, sections, embeddings, queries, answers
-- 📋 View complete lineage: trace where any data came from and where it went
+### Access the Dashboard
+Click the **"📊 Lineage"** button in the top-right corner of the app, or navigate to:
+```
+http://localhost:8501/lineage_dashboard
+```
+
+### Dashboard Features
+Monitor end-to-end data flow from document ingestion → embedding → retrieval → LLM response:
 
 **Dashboard Views:**
-1. **Overview**: Total events, assets, success rate, operation breakdown
-2. **Events Timeline**: Chronological event log with filtering and visualization
+1. **Overview** (default): Total events, assets, success rate, and operation breakdown with visualizations
+2. **Events Timeline**: Chronological event log with filtering by operation type
 3. **Asset Lineage**: Trace complete data flow for any document or section
-4. **Performance Analysis**: Duration distribution, trends, and statistics
+4. **Performance Analysis**: Duration distribution, trends over time, and slowest operations
 
-**Integration:**
-- Automatically tracks all document uploads and processing
-- Adds minimal overhead (~5-10ms per operation)
-- Data stored locally in `.cache/lineage.db` (SQLite)
-- No external services or cloud dependencies
+### Tracked Operations
+The system automatically tracks:
+- 📄 **ingest**: Document ingestion (PDF files with metadata)
+- 📑 **extract_section**: Section extraction from documents
+- 🔢 **embed**: Embedding generation from sections (1024 dimensions)
+- 🗄️ **store_lancedb**: Storage in LanceDB vector database
+- 🔍 **retrieve**: Retrieval from LanceDB (with cache hit tracking)
+- 🤖 **llm_response**: LLM-generated answers with model info
 
-See [DATA_LINEAGE_GUIDE.md](DATA_LINEAGE_GUIDE.md) for detailed API documentation.
+### Key Metrics
+- ⏱️ Operation duration (milliseconds)
+- 📊 Total events and unique assets
+- ✅ Success rate and status breakdown
+- 📈 Operation counts and average durations
+- 🔗 Complete data flow lineage for any asset
+
+### How to Use
+1. **Upload a Document**: When you upload a PDF, all processing steps are automatically tracked
+2. **Ask Questions**: Retrievals and LLM responses are tracked in real-time
+3. **View Dashboard**: Click "📊 Lineage" button to see live metrics and visualizations
+4. **Analyze Performance**: Check the Performance Analysis view for bottlenecks
+
+### Technical Details
+- **Storage**: SQLite database at `.cache/lineage.db` (local, private)
+- **Overhead**: ~5-10ms per tracked operation (minimal impact)
+- **Standard**: OpenLineage-compliant metadata format
+- **Dependencies**: None (uses built-in SQLite + Plotly)
+- **No External Services**: All data stored locally
+
+See [documentation/DATA_LINEAGE_GUIDE.md](documentation/DATA_LINEAGE_GUIDE.md) for detailed API documentation and [documentation/LINEAGE_IMPLEMENTATION.md](documentation/LINEAGE_IMPLEMENTATION.md) for implementation details.
 
 ## Prerequisites
 
