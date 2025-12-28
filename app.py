@@ -18,6 +18,7 @@ from lancedb_chat import create_lancedb_chat, FilterConfig
 from lancedb_cache import get_lancedb_store
 from agentic_rag import create_agentic_rag, AgenticRAG
 from agent_sdk_tools import create_cag_mcp_server, CAG_TOOL_NAMES
+from voice_features import get_voice_processor, VoiceConfig, is_voice_available
 
 # Import Claude Skills PDF parser
 from skills.pdf_parser.enhanced_parser import get_enhanced_parser, Section, SectionMetadata
@@ -394,6 +395,12 @@ if "lancedb_chat_mode" not in st.session_state:
     st.session_state.lancedb_chat_mode = False
 if "lancedb_search_mode" not in st.session_state:
     st.session_state.lancedb_search_mode = "hybrid"  # 'semantic' or 'hybrid'
+if "voice_enabled" not in st.session_state:
+    st.session_state.voice_enabled = is_voice_available()
+if "voice_input_enabled" not in st.session_state:
+    st.session_state.voice_input_enabled = False
+if "voice_output_enabled" not in st.session_state:
+    st.session_state.voice_output_enabled = False
     
 with st.sidebar:
     st.title("CAG Vault")
@@ -1119,6 +1126,81 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Voice Features
+    if st.session_state.voice_enabled:
+        with st.expander("🎤 **Voice Features**", expanded=False):
+            st.markdown("**Speech-to-text and text-to-speech**")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                enable_voice_input = st.checkbox(
+                    "🎙️ Voice Input",
+                    value=st.session_state.voice_input_enabled,
+                    key="voice_input_toggle",
+                    help="Record questions via microphone"
+                )
+                st.session_state.voice_input_enabled = enable_voice_input
+            
+            with col2:
+                enable_voice_output = st.checkbox(
+                    "🔊 Voice Output",
+                    value=st.session_state.voice_output_enabled,
+                    key="voice_output_toggle",
+                    help="Synthesize answers to speech"
+                )
+                st.session_state.voice_output_enabled = enable_voice_output
+            
+            if enable_voice_input or enable_voice_output:
+                # Voice Configuration
+                st.markdown("**Configuration**")
+                
+                if enable_voice_input:
+                    st.caption("🎙️ **Voice Input Settings**")
+                    record_duration = st.slider(
+                        "Recording Duration (seconds)",
+                        min_value=5,
+                        max_value=60,
+                        value=10,
+                        step=5,
+                        key="voice_record_duration",
+                        help="Maximum recording time"
+                    )
+                    st.session_state.voice_record_duration = record_duration
+                
+                if enable_voice_output:
+                    st.caption("🔊 **Voice Output Settings**")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        tts_rate = st.slider(
+                            "Speech Rate (WPM)",
+                            min_value=50,
+                            max_value=300,
+                            value=150,
+                            step=10,
+                            key="voice_tts_rate",
+                            help="Words per minute"
+                        )
+                        st.session_state.voice_tts_rate = tts_rate
+                    
+                    with col2:
+                        tts_volume = st.slider(
+                            "Volume",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=1.0,
+                            step=0.1,
+                            key="voice_tts_volume"
+                        )
+                        st.session_state.voice_tts_volume = tts_volume
+    else:
+        with st.expander("🎤 **Voice Features (Disabled)**", expanded=False):
+            st.warning(
+                "Voice features require additional dependencies. Install with:\n"
+                "`pip install pyttsx3 sounddevice soundfile openai`"
+            )
+    
+    st.markdown("---")
+    
     uploaded_file = st.file_uploader(
         "Upload a Document",
         type=Config.UI.ALLOWED_FILE_TYPES,
@@ -1488,6 +1570,33 @@ elif st.session_state.sources:
             st.markdown(message["content"])
             if message["role"] == "assistant":
                 render_skill_list(message.get("skills"), label="Skills used", expanded=False)
+                
+                # Voice Output for Assistant Messages
+                if st.session_state.voice_enabled and st.session_state.voice_output_enabled:
+                    col1, col2 = st.columns([0.3, 0.7])
+                    with col1:
+                        if st.button("🔊 Speak", key=f"voice_speak_{id(message)}", use_container_width=True):
+                            with st.spinner("Synthesizing speech..."):
+                                try:
+                                    voice_config = VoiceConfig(
+                                        tts_rate=st.session_state.get("voice_tts_rate", 150),
+                                        tts_volume=st.session_state.get("voice_tts_volume", 1.0)
+                                    )
+                                    voice_processor = get_voice_processor(voice_config)
+                                    audio_bytes = voice_processor.synthesize_answer(message["content"])
+                                    
+                                    if audio_bytes:
+                                        st.session_state[f"answer_audio_{id(message)}"] = audio_bytes
+                                        st.success("✅ Audio ready")
+                                    else:
+                                        st.error("Speech synthesis failed")
+                                except Exception as e:
+                                    st.error(f"TTS error: {str(e)}")
+                    
+                    with col2:
+                        audio_key = f"answer_audio_{id(message)}"
+                        if audio_key in st.session_state:
+                            st.audio(st.session_state[audio_key], format="audio/wav")
             # Link section references in assistant replies to full sections from LanceDB
             if message["role"] == "assistant" and st.session_state.parsed_documents:
                 # Collect sections for the current message's documents
@@ -1565,6 +1674,56 @@ elif st.session_state.sources:
                                     st.session_state.messages.append({"role": "user", "content": q['question'], "thinking": None})
                                     st.session_state.message_source_ids = set(st.session_state.sources.keys())
                                     st.rerun()
+    
+    # Voice Input Recording
+    if st.session_state.voice_enabled and st.session_state.voice_input_enabled and chat_enabled:
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("🎙️ Record Question", key="voice_record_btn"):
+                with st.spinner("Recording..."):
+                    try:
+                        voice_processor = get_voice_processor(
+                            VoiceConfig(
+                                record_duration_max=st.session_state.get("voice_record_duration", 10)
+                            )
+                        )
+                        audio_bytes, sample_rate = voice_processor.record_audio(
+                            st.session_state.get("voice_record_duration", 10)
+                        )
+                        
+                        if audio_bytes:
+                            st.session_state.last_audio = audio_bytes
+                            st.success("✅ Recording saved. Transcribing...")
+                    except Exception as e:
+                        st.error(f"Recording failed: {str(e)}")
+        
+        with col2:
+            if st.button("📝 Transcribe", key="voice_transcribe_btn", disabled="last_audio" not in st.session_state):
+                if "last_audio" in st.session_state:
+                    with st.spinner("Transcribing..."):
+                        try:
+                            voice_processor = get_voice_processor()
+                            question = voice_processor.transcribe_and_extract_question(
+                                st.session_state.last_audio
+                            )
+                            
+                            if question:
+                                st.session_state.messages.append({
+                                    "role": "user",
+                                    "content": question,
+                                    "thinking": None
+                                })
+                                st.session_state.message_source_ids = set(st.session_state.sources.keys())
+                                st.success(f"✓ Transcribed: {question}")
+                                st.rerun()
+                            else:
+                                st.error("Transcription failed")
+                        except Exception as e:
+                            st.error(f"Transcription error: {str(e)}")
+        
+        with col3:
+            if "last_audio" in st.session_state:
+                st.audio(st.session_state.last_audio, format="audio/wav")
     
     if prompt := st.chat_input(
         "Ask CAG about your documents...",

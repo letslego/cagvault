@@ -160,3 +160,6 @@ uploaded_files/
 temp/
 cache/
 knowledge-base/
+
+# Database
+lancedb/

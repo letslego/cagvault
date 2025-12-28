@@ -272,7 +272,15 @@ CagVault now runs as a local agentic stack that combines Streamlit UI, Claude Ag
 - **Autocomplete Search**: Type-ahead suggestions from question library
 - **Multi-Document Context**: Chat across multiple documents simultaneously
 
-### 🎯 Credit Agreement Analysis
+### � Voice Features (Optional)
+- **Speech-to-Text (STT)**: Record questions via microphone using OpenAI's Whisper API
+- **Text-to-Speech (TTS)**: Synthesize answers to audio using pyttsx3 (local synthesis)
+- **Voice Input**: Ask questions hands-free, ideal for multitasking
+- **Voice Output**: Listen to answers while reviewing documents
+- **Configurable Settings**: Adjust recording duration, speech rate, and volume
+- **Privacy**: Local TTS synthesis; Whisper STT is API-based but can be disabled
+
+### �🎯 Credit Agreement Analysis
 - **Section Classification**: Automatic identification of COVENANTS, DEFAULTS, DEFINITIONS, etc.
 - **Importance Scoring**: AI-driven relevance analysis for credit analysts
 - **Cross-Reference Tracking**: Detect dependencies between sections
@@ -525,7 +533,28 @@ print("Migration complete! Redis data imported to LanceDB.")
 
 **Note**: After migration, you can optionally remove Redis. LanceDB is now the default persistent storage and requires no separate server.
 
-### 7. Verify Installation
+### 7. (Optional) Enable Voice Features
+
+Voice features allow speech-to-text input and text-to-speech output. Install optional dependencies:
+
+```bash
+pip install pyttsx3 sounddevice soundfile openai
+```
+
+**Requirements:**
+- `pyttsx3`: Local text-to-speech synthesis (no API key needed)
+- `sounddevice` + `soundfile`: Audio recording from microphone
+- `openai`: Access to Whisper API for speech-to-text (requires `OPENAI_API_KEY` environment variable)
+
+**Set up OpenAI API key (optional, for Whisper STT):**
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+If you don't have an OpenAI API key, TTS will still work locally, and STT will be disabled.
+
+### 8. Verify Installation
 
 Check that everything is installed correctly:
 
@@ -538,6 +567,9 @@ ollama list  # Should show your downloaded models
 
 # Python packages
 pip list | grep -E "(streamlit|langchain|docling|lancedb)"
+
+# Optional voice features (if installed)
+pip list | grep -E "(pyttsx3|sounddevice|openai)"
 ```
 
 ## Running the Application
@@ -621,7 +653,40 @@ The application will open in your browser at `http://localhost:8504`
 - Green "💾 Using cached response" = instant retrieval from LanceDB
 - No indicator = fresh LLM generation + automatic caching to LanceDB
 
-#### 5. Manage Caches
+**Voice Output (Optional):**
+- Click "🔊 Speak" button next to assistant responses
+- Hear synthesized answers while reviewing documents
+- Adjust speech rate and volume in sidebar "🎤 Voice Features"
+- Perfect for hands-free operation or accessibility
+
+#### 5. Use Voice Features (Optional)
+
+**Voice Input:**
+- Click "🎙️ Record Question" to start recording via microphone
+- Audio is recorded locally (privacy-first)
+- Click "📝 Transcribe" to convert speech to text using Whisper
+- Transcribed question is automatically submitted for analysis
+
+**Voice Output:**
+- Click "🔊 Speak" below any assistant answer
+- Answer text is synthesized to audio using local TTS
+- Adjust settings in sidebar (speech rate, volume)
+- Audio plays inline with playback controls
+
+**Configuration (Sidebar):**
+- Expand "🎤 Voice Features" section
+- Toggle "🎙️ Voice Input" to enable recording
+- Toggle "🔊 Voice Output" to enable synthesis
+- Adjust recording duration (5-60 seconds)
+- Adjust speech rate (50-300 words per minute)
+- Adjust output volume (0.0-1.0)
+
+**Requirements:**
+- Voice Input: Requires `OPENAI_API_KEY` (uses Whisper API)
+- Voice Output: Works offline with pyttsx3 (no API needed)
+- Both: Requires audio recording libraries (`sounddevice`, `soundfile`)
+
+#### 6. Manage Caches
 
 **Cache Stats (Sidebar):**
 - View total contexts, tokens, and cache hits
@@ -652,6 +717,7 @@ cagvault/
 ├── lancedb_cache.py                # LanceDB storage layer with in-process cache
 ├── qa_cache.py                     # LanceDB-backed Q&A caching system
 ├── question_library.py             # Question library with categorization
+├── voice_features.py               # Speech-to-text and text-to-speech (optional)
 ├── simple_cag.py                   # Simplified CAG implementation
 ├── pyproject.toml                  # Python dependencies
 ├── lancedb/                        # LanceDB embedded database directory
