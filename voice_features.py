@@ -94,52 +94,34 @@ class VoiceProcessor:
         self.openai_client = None
         self.whisper_model = None
         self.faster_whisper_model = None
+        self._model_load_attempted = False  # Track if we've tried to load model
         
         # Determine STT backend
         if self.config.stt_backend == "auto":
-            if FASTER_WHISPER_AVAILABLE:
+            if OPENAI_AVAILABLE:
+                # Prefer OpenAI API to avoid heavy model downloads at startup
+                self.config.stt_backend = "openai"
+            elif FASTER_WHISPER_AVAILABLE:
                 self.config.stt_backend = "faster-whisper"
             elif WHISPER_LOCAL_AVAILABLE:
                 self.config.stt_backend = "local"
-            elif OPENAI_AVAILABLE:
-                self.config.stt_backend = "openai"
             else:
                 self.config.stt_enabled = False
                 logger.warning("No STT backend available")
         
-        # Initialize OpenAI Whisper API
+        # Initialize OpenAI Whisper API (fast, no model loading)
         if self.config.stt_backend == "openai" and OPENAI_AVAILABLE:
             api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
             if api_key:
                 self.openai_client = OpenAI(api_key=api_key)
-                logger.info("Using OpenAI Whisper API for STT")
+                logger.info("Using OpenAI Whisper API for STT (cloud-based)")
             else:
-                logger.warning("OPENAI_API_KEY not found. Switching to local Whisper.")
-                self.config.stt_backend = "local"
+                logger.warning("OPENAI_API_KEY not found. Will use local Whisper on first use.")
+                # Don't disable yet - lazy load local model when needed
         
-        # Initialize local Whisper model
-        if self.config.stt_backend == "local" and WHISPER_LOCAL_AVAILABLE:
-            try:
-                logger.info(f"Loading local Whisper model: {self.config.stt_model}")
-                self.whisper_model = whisper.load_model(self.config.stt_model)
-                logger.info("Local Whisper model loaded (open source)")
-            except Exception as e:
-                logger.error(f"Failed to load local Whisper: {e}")
-                self.config.stt_enabled = False
-        
-        # Initialize Faster Whisper model
-        if self.config.stt_backend == "faster-whisper" and FASTER_WHISPER_AVAILABLE:
-            try:
-                logger.info(f"Loading Faster Whisper model: {self.config.stt_model}")
-                self.faster_whisper_model = WhisperModel(
-                    self.config.stt_model,
-                    device="cpu",  # Use "cuda" if GPU available
-                    compute_type="int8"  # Quantized for speed
-                )
-                logger.info("Faster Whisper model loaded (optimized open source)")
-            except Exception as e:
-                logger.error(f"Failed to load Faster Whisper: {e}")
-                self.config.stt_enabled = False
+        # NOTE: Local Whisper and Faster Whisper models are loaded LAZILY
+        # They will only be loaded when first used via speech_to_text()
+        # This prevents app startup from being blocked by 145MB+ model downloads
         
         # Initialize pyttsx3 for local TTS (already open source)
         self.tts_engine = None
@@ -194,6 +176,40 @@ class VoiceProcessor:
             logger.error(f"Audio recording failed: {e}")
             return None, None
     
+    def _load_local_model(self) -> bool:
+        """Lazy load local Whisper model on first use."""
+        if self._model_load_attempted:
+            return self.whisper_model is not None or self.faster_whisper_model is not None
+        
+        self._model_load_attempted = True
+        
+        # Try Faster Whisper first
+        if self.config.stt_backend == "faster-whisper" and FASTER_WHISPER_AVAILABLE and not self.faster_whisper_model:
+            try:
+                logger.info(f"[LAZY LOAD] Loading Faster Whisper model: {self.config.stt_model}")
+                self.faster_whisper_model = WhisperModel(
+                    self.config.stt_model,
+                    device="cpu",
+                    compute_type="int8"
+                )
+                logger.info("✓ Faster Whisper model loaded (optimized open source)")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load Faster Whisper: {e}")
+                self.config.stt_backend = "local"
+        
+        # Fall back to standard Whisper
+        if self.config.stt_backend == "local" and WHISPER_LOCAL_AVAILABLE and not self.whisper_model:
+            try:
+                logger.info(f"[LAZY LOAD] Loading local Whisper model: {self.config.stt_model}")
+                self.whisper_model = whisper.load_model(self.config.stt_model)
+                logger.info("✓ Local Whisper model loaded (open source)")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load local Whisper: {e}")
+        
+        return False
+    
     def speech_to_text(self, audio_bytes: bytes, language: Optional[str] = None) -> Optional[str]:
         """Convert speech to text using selected Whisper backend.
         
@@ -215,7 +231,7 @@ class VoiceProcessor:
         language = language or self.config.stt_language
         
         try:
-            # OpenAI Whisper API
+            # OpenAI Whisper API (fast, no model loading)
             if self.config.stt_backend == "openai" and self.openai_client:
                 audio_file = io.BytesIO(audio_bytes)
                 audio_file.name = "audio.wav"
@@ -227,11 +243,18 @@ class VoiceProcessor:
                     temperature=0.0
                 )
                 text = transcript.text.strip()
-                logger.info(f"Transcribed (OpenAI): {text}")
+                logger.info(f"Transcribed (OpenAI API): {text}")
                 return text
             
+            # Local models - lazy load on first use
+            if self.config.stt_backend in ("local", "faster-whisper"):
+                logger.info("Loading local speech-to-text model (first use only)...")
+                if not self._load_local_model():
+                    logger.error("Failed to load local model")
+                    return None
+            
             # Local Whisper (open source)
-            elif self.config.stt_backend == "local" and self.whisper_model:
+            if self.config.stt_backend == "local" and self.whisper_model:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
                     tmp.write(audio_bytes)
                     tmp_path = tmp.name
@@ -250,7 +273,7 @@ class VoiceProcessor:
                         os.unlink(tmp_path)
             
             # Faster Whisper (optimized open source)
-            elif self.config.stt_backend == "faster-whisper" and self.faster_whisper_model:
+            if self.config.stt_backend == "faster-whisper" and self.faster_whisper_model:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
                     tmp.write(audio_bytes)
                     tmp_path = tmp.name
